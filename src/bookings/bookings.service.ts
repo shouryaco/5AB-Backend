@@ -2,7 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
-
+import { BookingStatus } from '../common/enums/booking-status.enum';
+import { PrismaClient, Prisma } from '@prisma/client';
 @Injectable()
 export class BookingsService {
   constructor(
@@ -47,7 +48,7 @@ export class BookingsService {
     },
     data: {
       assignedDriverId: driverId,
-      status: 'ASSIGNED',
+      status: BookingStatus.ASSIGNED
     },
     include: {
       assignedDriver: true,

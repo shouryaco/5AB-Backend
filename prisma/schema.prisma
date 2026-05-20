@@ -5,8 +5,7 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -14,39 +13,56 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum BookingStatus {
+  PENDING
+  ASSIGNED
+  ACCEPTED
+  ARRIVED
+  STARTED
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum DriverStatus {
+  AVAILABLE
+  BUSY
+  OFFLINE
+}
+
 model Booking {
-  id                String   @id @default(uuid())
-  bookingReference  String
-  customerName      String
-  customerPhone     String
-  customerEmail     String?
-  pickupAddress     String
-  dropoffAddress    String
-  pickupDatetime    DateTime
-  journeyType       String?
-  passengers        Int?
-  luggage           Int?
-  notes             String?
-  status            String   @default("PENDING")
+  id               String        @id @default(uuid())
+  bookingReference String
+  customerName     String
+  customerPhone    String
+  customerEmail    String?
+  pickupAddress    String
+  dropoffAddress   String
+  pickupDatetime   DateTime
+  journeyType      String?
+  passengers       Int?
+  luggage          Int?
+  notes            String?
+  status           BookingStatus @default(PENDING)
 
-  assignedDriverId  String?
-  assignedDriver    Driver?  @relation(fields: [assignedDriverId], references: [id])
+  assignedDriverId String?
+  assignedDriver   Driver? @relation(fields: [assignedDriverId], references: [id])
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Driver {
-  id              String    @id @default(uuid())
-  name            String
-  phone           String
-  photo           String?
-  vehicleName     String?
-  vehicleNumber   String?
-  status          String    @default("AVAILABLE")
+  id            String       @id @default(uuid())
+  name          String
+  phone         String
+  photo         String?
+  vehicleName   String?
+  vehicleNumber String?
+  status        DriverStatus @default(AVAILABLE)
 
-  bookings        Booking[]
+  bookings Booking[]
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
