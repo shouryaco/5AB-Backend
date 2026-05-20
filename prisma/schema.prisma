@@ -49,6 +49,13 @@ model Booking {
   assignedDriverId String?
   assignedDriver   Driver? @relation(fields: [assignedDriverId], references: [id])
 
+  acceptedAt  DateTime?
+  arrivedAt   DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  rejectedAt  DateTime?
+  cancelledAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

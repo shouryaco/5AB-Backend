@@ -83,7 +83,15 @@ export class BookingsService {
   }
 
   async acceptBooking(bookingId: string) {
-    return this.updateBookingStatus(bookingId, BookingStatus.ACCEPTED);
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status: BookingStatus.ACCEPTED,
+        acceptedAt: new Date(),
+      },
+    });
   }
 
   async arrivedBooking(bookingId: string) {
@@ -100,7 +108,15 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(bookingId, BookingStatus.ARRIVED);
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status: BookingStatus.ARRIVED,
+        arrivedAt: new Date(),
+      },
+    });
   }
 
   async startBooking(bookingId: string) {
@@ -117,7 +133,15 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(bookingId, BookingStatus.STARTED);
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status: BookingStatus.STARTED,
+        startedAt: new Date(),
+      },
+    });
   }
 
   async completeBooking(bookingId: string) {
@@ -134,7 +158,15 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(bookingId, BookingStatus.COMPLETED);
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status: BookingStatus.COMPLETED,
+        completedAt: new Date(),
+      },
+    });
   }
 
   async rejectBooking(bookingId: string) {
@@ -151,6 +183,25 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(bookingId, BookingStatus.REJECTED);
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status: BookingStatus.REJECTED,
+        rejectedAt: new Date(),
+      },
+    });
+  }
+  async cancelBooking(bookingId: string) {
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status: BookingStatus.CANCELLED,
+        cancelledAt: new Date(),
+      },
+    });
   }
 }
