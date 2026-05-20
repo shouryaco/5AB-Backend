@@ -1,22 +1,28 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
+
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { AssignDriverDto } from './dto/assign-driver.dto';
+
 import { WebsocketGateway } from '../websocket/websocket.gateway';
+
 import { BookingStatus } from '../common/enums/booking-status.enum';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { DriverStatus } from '../common/enums/driver-status.enum';
+
+import { DriversService } from '../drivers/drivers.service';
+
 @Injectable()
 export class BookingsService {
   constructor(
-  private prisma: PrismaService,
-  private websocketGateway: WebsocketGateway,
-) {}
+    private prisma: PrismaService,
+    private websocketGateway: WebsocketGateway,
+    private driversService: DriversService,
+  ) {}
 
   async create(createBookingDto: CreateBookingDto) {
     return this.prisma.booking.create({
-      data: {
-        ...createBookingDto,
-        pickupDatetime: new Date(createBookingDto.pickupDatetime),
-      },
+      data: createBookingDto,
     });
   }
 
@@ -31,84 +37,131 @@ export class BookingsService {
     });
   }
 
+  async assignDriver(
+    bookingId: string,
+    assignDriverDto: AssignDriverDto,
+  ) {
+    const { driverId } = assignDriverDto;
+
+    const booking = await this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        assignedDriverId: driverId,
+        status: BookingStatus.ASSIGNED,
+      },
+      include: {
+        assignedDriver: true,
+      },
+    });
+
+    this.websocketGateway.sendBookingToDriver(
+      driverId,
+      booking,
+    );
+
+    return booking;
+  }
+
   async updateBookingStatus(
-      bookingId: string,
-      status: BookingStatus,
-    ) {
-      return this.prisma.booking.update({
-        where: {
-          id: bookingId,
-        },
-        data: {
-          status,
-        },
-      });
+    bookingId: string,
+    status: BookingStatus,
+  ) {
+    return this.prisma.booking.update({
+      where: {
+        id: bookingId,
+      },
+      data: {
+        status,
+      },
+    });
+  }
+
+  async acceptBooking(bookingId: string) {
+    return this.updateBookingStatus(
+      bookingId,
+      BookingStatus.ACCEPTED,
+    );
+  }
+
+  async arrivedBooking(bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+    });
+
+    if (booking?.assignedDriverId) {
+      await this.driversService.updateDriverStatus(
+        booking.assignedDriverId,
+        DriverStatus.BUSY,
+      );
     }
 
-    async acceptBooking(bookingId: string) {
-  return this.updateBookingStatus(
-    bookingId,
-    BookingStatus.ACCEPTED,
-  );
-}
+    return this.updateBookingStatus(
+      bookingId,
+      BookingStatus.ARRIVED,
+    );
+  }
 
-async arrivedBooking(bookingId: string) {
-  return this.updateBookingStatus(
-    bookingId,
-    BookingStatus.ARRIVED,
-  );
-}
+  async startBooking(bookingId: string) {
+  const booking = await this.prisma.booking.findUnique({
+    where: {
+      id: bookingId,
+    },
+  });
 
-async startBooking(bookingId: string) {
+  if (booking?.assignedDriverId) {
+    await this.driversService.updateDriverStatus(
+      booking.assignedDriverId,
+      DriverStatus.BUSY,
+    );
+  }
+
   return this.updateBookingStatus(
     bookingId,
     BookingStatus.STARTED,
   );
 }
 
-async completeBooking(bookingId: string) {
-  return this.updateBookingStatus(
-    bookingId,
-    BookingStatus.COMPLETED,
-  );
-}
+  async completeBooking(bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+    });
 
-async rejectBooking(bookingId: string) {
-  return this.updateBookingStatus(
-    bookingId,
-    BookingStatus.REJECTED,
-  );
-}
+    if (booking?.assignedDriverId) {
+      await this.driversService.updateDriverStatus(
+        booking.assignedDriverId,
+        DriverStatus.AVAILABLE,
+      );
+    }
 
-  async assignDriver(bookingId: string, driverId: string) {
-  const driver = await this.prisma.driver.findUnique({
-    where: {
-      id: driverId,
-    },
-  });
-
-  if (!driver) {
-    throw new NotFoundException('Driver not found');
+    return this.updateBookingStatus(
+      bookingId,
+      BookingStatus.COMPLETED,
+    );
   }
 
-  const updatedBooking = await this.prisma.booking.update({
-    where: {
-      id: bookingId,
-    },
-    data: {
-      assignedDriverId: driverId,
-      status: BookingStatus.ASSIGNED
-    },
-    include: {
-      assignedDriver: true,
-    },
-  });
+  async rejectBooking(bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+    });
 
-  this.websocketGateway.sendBookingToDriver(
-    driverId,
-    updatedBooking,
-  );
+    if (booking?.assignedDriverId) {
+      await this.driversService.updateDriverStatus(
+        booking.assignedDriverId,
+        DriverStatus.AVAILABLE,
+      );
+    }
 
-  return updatedBooking;
-}
+    return this.updateBookingStatus(
+      bookingId,
+      BookingStatus.REJECTED,
+    );
+  }
 }

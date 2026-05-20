@@ -32,7 +32,7 @@ export class BookingsController {
   ) {
     return this.bookingsService.assignDriver(
       bookingId,
-      assignDriverDto.driverId,
+      assignDriverDto,
     );
   }
 

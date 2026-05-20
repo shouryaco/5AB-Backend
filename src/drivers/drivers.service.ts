@@ -20,4 +20,18 @@ export class DriversService {
       },
     });
   }
+
+  async updateDriverStatus(
+  driverId: string,
+  status: DriverStatus,
+) {
+  return this.prisma.driver.update({
+    where: {
+      id: driverId,
+    },
+    data: {
+      status,
+    },
+  });
+}
 }

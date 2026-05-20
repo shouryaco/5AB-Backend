@@ -4,9 +4,10 @@ import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
 
 import { WebsocketModule } from '../websocket/websocket.module';
+import { DriversModule } from '../drivers/drivers.module';
 
 @Module({
-  imports: [WebsocketModule],
+  imports: [WebsocketModule,DriversModule],
   controllers: [BookingsController],
   providers: [BookingsService],
 })
