@@ -35,4 +35,29 @@ export class BookingsController {
       assignDriverDto.driverId,
     );
   }
+
+  @Patch(':id/accept')
+acceptBooking(@Param('id') id: string) {
+  return this.bookingsService.acceptBooking(id);
+}
+
+@Patch(':id/arrived')
+arrivedBooking(@Param('id') id: string) {
+  return this.bookingsService.arrivedBooking(id);
+}
+
+@Patch(':id/start')
+startBooking(@Param('id') id: string) {
+  return this.bookingsService.startBooking(id);
+}
+
+@Patch(':id/complete')
+completeBooking(@Param('id') id: string) {
+  return this.bookingsService.completeBooking(id);
+}
+
+@Patch(':id/reject')
+rejectBooking(@Param('id') id: string) {
+  return this.bookingsService.rejectBooking(id);
+}
 }

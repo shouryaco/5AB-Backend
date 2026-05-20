@@ -31,6 +31,55 @@ export class BookingsService {
     });
   }
 
+  async updateBookingStatus(
+      bookingId: string,
+      status: BookingStatus,
+    ) {
+      return this.prisma.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status,
+        },
+      });
+    }
+
+    async acceptBooking(bookingId: string) {
+  return this.updateBookingStatus(
+    bookingId,
+    BookingStatus.ACCEPTED,
+  );
+}
+
+async arrivedBooking(bookingId: string) {
+  return this.updateBookingStatus(
+    bookingId,
+    BookingStatus.ARRIVED,
+  );
+}
+
+async startBooking(bookingId: string) {
+  return this.updateBookingStatus(
+    bookingId,
+    BookingStatus.STARTED,
+  );
+}
+
+async completeBooking(bookingId: string) {
+  return this.updateBookingStatus(
+    bookingId,
+    BookingStatus.COMPLETED,
+  );
+}
+
+async rejectBooking(bookingId: string) {
+  return this.updateBookingStatus(
+    bookingId,
+    BookingStatus.REJECTED,
+  );
+}
+
   async assignDriver(bookingId: string, driverId: string) {
   const driver = await this.prisma.driver.findUnique({
     where: {
