@@ -21,17 +21,24 @@ export class DriversService {
     });
   }
 
-  async updateDriverStatus(
-  driverId: string,
-  status: DriverStatus,
-) {
-  return this.prisma.driver.update({
-    where: {
-      id: driverId,
-    },
-    data: {
-      status,
-    },
-  });
-}
+  async updateDriverStatus(driverId: string, status: DriverStatus) {
+    return this.prisma.driver.update({
+      where: {
+        id: driverId,
+      },
+      data: {
+        status,
+      },
+    });
+  }
+  async setDriverOnline(driverId: string) {
+    return this.updateDriverStatus(driverId, DriverStatus.AVAILABLE);
+  }
+
+  async setDriverOffline(driverId: string) {
+    return this.updateDriverStatus(driverId, DriverStatus.OFFLINE);
+  }
+  async setDriverInactive(driverId: string) {
+    return this.updateDriverStatus(driverId, DriverStatus.INACTIVE);
+  }
 }

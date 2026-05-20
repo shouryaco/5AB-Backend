@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -37,11 +37,21 @@ export class BookingsService {
     });
   }
 
-  async assignDriver(
-    bookingId: string,
-    assignDriverDto: AssignDriverDto,
-  ) {
+  async assignDriver(bookingId: string, assignDriverDto: AssignDriverDto) {
     const { driverId } = assignDriverDto;
+
+    const driver = await this.prisma.driver.findUnique({
+      where: {
+        id: driverId,
+      },
+    });
+
+    if (!driver) {
+      throw new BadRequestException('Driver not found');
+    }
+    if (driver.status === DriverStatus.INACTIVE) {
+      throw new BadRequestException('Driver is inactive');
+    }
 
     const booking = await this.prisma.booking.update({
       where: {
@@ -56,18 +66,12 @@ export class BookingsService {
       },
     });
 
-    this.websocketGateway.sendBookingToDriver(
-      driverId,
-      booking,
-    );
+    this.websocketGateway.sendBookingToDriver(driverId, booking);
 
     return booking;
   }
 
-  async updateBookingStatus(
-    bookingId: string,
-    status: BookingStatus,
-  ) {
+  async updateBookingStatus(bookingId: string, status: BookingStatus) {
     return this.prisma.booking.update({
       where: {
         id: bookingId,
@@ -79,10 +83,7 @@ export class BookingsService {
   }
 
   async acceptBooking(bookingId: string) {
-    return this.updateBookingStatus(
-      bookingId,
-      BookingStatus.ACCEPTED,
-    );
+    return this.updateBookingStatus(bookingId, BookingStatus.ACCEPTED);
   }
 
   async arrivedBooking(bookingId: string) {
@@ -99,31 +100,25 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(
-      bookingId,
-      BookingStatus.ARRIVED,
-    );
+    return this.updateBookingStatus(bookingId, BookingStatus.ARRIVED);
   }
 
   async startBooking(bookingId: string) {
-  const booking = await this.prisma.booking.findUnique({
-    where: {
-      id: bookingId,
-    },
-  });
+    const booking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+    });
 
-  if (booking?.assignedDriverId) {
-    await this.driversService.updateDriverStatus(
-      booking.assignedDriverId,
-      DriverStatus.BUSY,
-    );
+    if (booking?.assignedDriverId) {
+      await this.driversService.updateDriverStatus(
+        booking.assignedDriverId,
+        DriverStatus.BUSY,
+      );
+    }
+
+    return this.updateBookingStatus(bookingId, BookingStatus.STARTED);
   }
-
-  return this.updateBookingStatus(
-    bookingId,
-    BookingStatus.STARTED,
-  );
-}
 
   async completeBooking(bookingId: string) {
     const booking = await this.prisma.booking.findUnique({
@@ -139,10 +134,7 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(
-      bookingId,
-      BookingStatus.COMPLETED,
-    );
+    return this.updateBookingStatus(bookingId, BookingStatus.COMPLETED);
   }
 
   async rejectBooking(bookingId: string) {
@@ -159,9 +151,6 @@ export class BookingsService {
       );
     }
 
-    return this.updateBookingStatus(
-      bookingId,
-      BookingStatus.REJECTED,
-    );
+    return this.updateBookingStatus(bookingId, BookingStatus.REJECTED);
   }
 }

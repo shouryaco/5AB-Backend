@@ -28,6 +28,7 @@ enum DriverStatus {
   AVAILABLE
   BUSY
   OFFLINE
+  INACTIVE
 }
 
 model Booking {
