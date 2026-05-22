@@ -6,6 +6,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { DriversModule } from './drivers/drivers.module';
 import { WebsocketModule } from './websocket/websocket.module';
 import { AdminModule } from './admin/admin.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AdminModule } from './admin/admin.module';
     DriversModule,
     WebsocketModule,
     AdminModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
