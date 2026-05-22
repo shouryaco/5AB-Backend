@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { DriversModule } from './drivers/drivers.module';
 import { WebsocketModule } from './websocket/websocket.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     BookingsModule,
     DriversModule,
     WebsocketModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

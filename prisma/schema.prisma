@@ -56,8 +56,9 @@ model Booking {
   rejectedAt  DateTime?
   cancelledAt DateTime?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  bookingStatusHistories BookingStatusHistory[]
 }
 
 model Driver {
@@ -73,4 +74,17 @@ model Driver {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model BookingStatusHistory {
+  id String @id @default(uuid())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id])
+
+  status BookingStatus
+
+  notes String?
+
+  createdAt DateTime @default(now())
 }

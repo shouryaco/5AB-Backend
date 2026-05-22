@@ -3,6 +3,8 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
+import { Query } from '@nestjs/common';
+import { QueryBookingDto } from './dto/query-booking.dto';
 
 @Controller('bookings')
 export class BookingsController {
@@ -14,8 +16,8 @@ export class BookingsController {
   }
 
   @Get()
-  findAll() {
-    return this.bookingsService.findAll();
+  findAll(@Query() query: QueryBookingDto) {
+    return this.bookingsService.findAll(query);
   }
 
   @Patch(':id/assign-driver')

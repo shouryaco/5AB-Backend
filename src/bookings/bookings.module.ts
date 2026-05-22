@@ -7,7 +7,8 @@ import { WebsocketModule } from '../websocket/websocket.module';
 import { DriversModule } from '../drivers/drivers.module';
 
 @Module({
-  imports: [WebsocketModule,DriversModule],
+  imports: [WebsocketModule, DriversModule],
+  exports: [BookingsService],
   controllers: [BookingsController],
   providers: [BookingsService],
 })
