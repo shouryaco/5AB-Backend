@@ -4,6 +4,11 @@ import { AuthService } from './auth.service';
 
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { Get, UseGuards } from '@nestjs/common';
+
+import { JwtAuthGuard } from './jwt-auth.guard';
+
+import { CurrentUser } from './current-user.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -17,5 +22,11 @@ export class AuthController {
   @Post('login')
   login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  me(@CurrentUser() user: any) {
+    return user;
   }
 }

@@ -5,6 +5,13 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
 import { Query } from '@nestjs/common';
 import { QueryBookingDto } from './dto/query-booking.dto';
+import { UseGuards } from '@nestjs/common';
+
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+
+import { RolesGuard } from '../auth/roles.guard';
+
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('bookings')
 export class BookingsController {
@@ -21,6 +28,8 @@ export class BookingsController {
   }
 
   @Patch(':id/assign-driver')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'DISPATCHER')
   assignDriver(
     @Param('id') bookingId: string,
     @Body() assignDriverDto: AssignDriverDto,
