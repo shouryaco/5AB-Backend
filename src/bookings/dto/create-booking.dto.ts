@@ -3,6 +3,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsNumber,
 } from 'class-validator';
 
 export class CreateBookingDto {
@@ -17,7 +18,7 @@ export class CreateBookingDto {
 
   @IsOptional()
   @IsString()
-  customerEmail?: string;
+  customerEmail: string;
 
   @IsString()
   pickupAddress: string;
@@ -43,4 +44,8 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  estimatedDurationMinutes?: number;
 }

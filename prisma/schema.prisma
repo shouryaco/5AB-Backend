@@ -56,9 +56,10 @@ model Booking {
   rejectedAt  DateTime?
   cancelledAt DateTime?
 
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
-  bookingStatusHistories BookingStatusHistory[]
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+  estimatedDurationMinutes Int                    @default(120)
+  bookingStatusHistories   BookingStatusHistory[]
 }
 
 model Driver {

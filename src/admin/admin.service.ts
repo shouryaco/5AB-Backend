@@ -196,6 +196,7 @@ export class AdminService {
     const hasConflict = await this.bookingsService.hasDriverConflict(
       driverId,
       booking.pickupDatetime,
+      booking.estimatedDurationMinutes,
     );
 
     if (hasConflict) {

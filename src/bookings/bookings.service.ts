@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
+import { QueryBookingDto } from './dto/query-booking.dto';
 
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 
@@ -11,8 +12,6 @@ import { BookingStatus } from '../common/enums/booking-status.enum';
 import { DriverStatus } from '../common/enums/driver-status.enum';
 
 import { DriversService } from '../drivers/drivers.service';
-
-import { QueryBookingDto } from './dto/query-booking.dto';
 
 @Injectable()
 export class BookingsService {
@@ -123,6 +122,7 @@ export class BookingsService {
 
         include: {
           assignedDriver: true,
+
           bookingStatusHistories: {
             orderBy: {
               createdAt: 'asc',
@@ -155,6 +155,50 @@ export class BookingsService {
     };
   }
 
+  async hasDriverConflict(
+    driverId: string,
+    pickupDatetime: Date,
+    estimatedDurationMinutes: number,
+  ) {
+    const requestedStart = new Date(pickupDatetime);
+
+    const requestedEnd = new Date(
+      requestedStart.getTime() + estimatedDurationMinutes * 60 * 1000,
+    );
+
+    const existingBookings = await this.prisma.booking.findMany({
+      where: {
+        assignedDriverId: driverId,
+
+        status: {
+          in: [
+            BookingStatus.ASSIGNED,
+            BookingStatus.ACCEPTED,
+            BookingStatus.ARRIVED,
+            BookingStatus.STARTED,
+          ],
+        },
+      },
+    });
+
+    for (const booking of existingBookings) {
+      const existingStart = new Date(booking.pickupDatetime);
+
+      const existingEnd = new Date(
+        existingStart.getTime() + booking.estimatedDurationMinutes * 60 * 1000,
+      );
+
+      const overlap =
+        requestedStart < existingEnd && requestedEnd > existingStart;
+
+      if (overlap) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   async assignDriver(bookingId: string, assignDriverDto: AssignDriverDto) {
     const { driverId } = assignDriverDto;
 
@@ -185,20 +229,23 @@ export class BookingsService {
     const hasConflict = await this.hasDriverConflict(
       driverId,
       booking.pickupDatetime,
+      booking.estimatedDurationMinutes,
     );
 
     if (hasConflict) {
-      throw new BadRequestException('Driver already has a conflicting booking');
+      throw new BadRequestException('Driver has conflicting booking schedule');
     }
 
     const updatedBooking = await this.prisma.booking.update({
       where: {
         id: bookingId,
       },
+
       data: {
         assignedDriverId: driverId,
         status: BookingStatus.ASSIGNED,
       },
+
       include: {
         assignedDriver: true,
       },
@@ -220,6 +267,7 @@ export class BookingsService {
       where: {
         id: bookingId,
       },
+
       data: {
         status,
       },
@@ -231,6 +279,7 @@ export class BookingsService {
       where: {
         id: bookingId,
       },
+
       data: {
         status: BookingStatus.ACCEPTED,
         acceptedAt: new Date(),
@@ -264,6 +313,7 @@ export class BookingsService {
       where: {
         id: bookingId,
       },
+
       data: {
         status: BookingStatus.ARRIVED,
         arrivedAt: new Date(),
@@ -297,6 +347,7 @@ export class BookingsService {
       where: {
         id: bookingId,
       },
+
       data: {
         status: BookingStatus.STARTED,
         startedAt: new Date(),
@@ -330,6 +381,7 @@ export class BookingsService {
       where: {
         id: bookingId,
       },
+
       data: {
         status: BookingStatus.COMPLETED,
         completedAt: new Date(),
@@ -363,6 +415,7 @@ export class BookingsService {
       where: {
         id: bookingId,
       },
+
       data: {
         status: BookingStatus.REJECTED,
         rejectedAt: new Date(),
@@ -379,10 +432,24 @@ export class BookingsService {
   }
 
   async cancelBooking(bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+    });
+
+    if (booking?.assignedDriverId) {
+      await this.driversService.updateDriverStatus(
+        booking.assignedDriverId,
+        DriverStatus.AVAILABLE,
+      );
+    }
+
     const updatedBooking = await this.prisma.booking.update({
       where: {
         id: bookingId,
       },
+
       data: {
         status: BookingStatus.CANCELLED,
         cancelledAt: new Date(),
@@ -396,37 +463,5 @@ export class BookingsService {
     );
 
     return updatedBooking;
-  }
-
-  async hasDriverConflict(driverId: string, pickupDatetime: Date) {
-    const twoHoursBefore = new Date(
-      pickupDatetime.getTime() - 2 * 60 * 60 * 1000,
-    );
-
-    const twoHoursAfter = new Date(
-      pickupDatetime.getTime() + 2 * 60 * 60 * 1000,
-    );
-
-    const conflictingBooking = await this.prisma.booking.findFirst({
-      where: {
-        assignedDriverId: driverId,
-
-        status: {
-          in: [
-            BookingStatus.ASSIGNED,
-            BookingStatus.ACCEPTED,
-            BookingStatus.ARRIVED,
-            BookingStatus.STARTED,
-          ],
-        },
-
-        pickupDatetime: {
-          gte: twoHoursBefore,
-          lte: twoHoursAfter,
-        },
-      },
-    });
-
-    return !!conflictingBooking;
   }
 }
