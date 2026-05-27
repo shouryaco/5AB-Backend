@@ -11,6 +11,11 @@ import { Roles } from '../auth/roles.decorator';
 
 import { UpdateMyStatusDto } from './dto/update-my-status.dto';
 
+import { UpdateLocationDto } from './dto/update-location.dto';
+import { Query } from '@nestjs/common';
+
+import { NearestDriverDto } from './dto/nearest-driver.dto';
+
 @Controller('drivers')
 export class DriversController {
   constructor(private readonly driversService: DriversService) {}
@@ -55,6 +60,33 @@ export class DriversController {
     return this.driversService.updateMyStatus(
       req.user.sub,
       updateMyStatusDto.status,
+    );
+  }
+  @Patch('location')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('DRIVER')
+  updateLocation(
+    @Req() req,
+
+    @Body()
+    updateLocationDto: UpdateLocationDto,
+  ) {
+    return this.driversService.updateLocation(
+      req.user.sub,
+      updateLocationDto.latitude,
+      updateLocationDto.longitude,
+    );
+  }
+  @Get('nearest')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'DISPATCHER')
+  findNearestDrivers(
+    @Query()
+    nearestDriverDto: NearestDriverDto,
+  ) {
+    return this.driversService.findNearestDrivers(
+      Number(nearestDriverDto.latitude),
+      Number(nearestDriverDto.longitude),
     );
   }
 }

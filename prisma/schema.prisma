@@ -77,7 +77,10 @@ model Driver {
   vehicleNumber String?
   status        DriverStatus @default(AVAILABLE)
 
-  bookings Booking[]
+  bookings           Booking[]
+  latitude           Float?
+  longitude          Float?
+  lastLocationUpdate DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
