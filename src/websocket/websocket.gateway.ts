@@ -10,7 +10,8 @@ import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: 'http://localhost:3001',
+    credentials: true,
   },
 })
 export class WebsocketGateway {
@@ -22,7 +23,9 @@ export class WebsocketGateway {
   @SubscribeMessage('register-driver')
   handleRegisterDriver(
     @MessageBody() driverId: string,
-    @ConnectedSocket() client: Socket,
+
+    @ConnectedSocket()
+    client: Socket,
   ) {
     this.drivers.set(driverId, client.id);
 
@@ -37,5 +40,11 @@ export class WebsocketGateway {
     if (socketId) {
       this.server.to(socketId).emit('new-booking', booking);
     }
+  }
+
+  notifyDispatchUpdate() {
+    console.log('Dispatch update emitted');
+
+    this.server.emit('dispatch-updated');
   }
 }

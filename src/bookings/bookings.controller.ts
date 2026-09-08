@@ -1,16 +1,23 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 
 import { BookingsService } from './bookings.service';
+
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { UpdateBookingDto } from './dto/update-booking.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
-import { Query } from '@nestjs/common';
 import { QueryBookingDto } from './dto/query-booking.dto';
-import { UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-
 import { RolesGuard } from '../auth/roles.guard';
-
 import { Roles } from '../auth/roles.decorator';
 
 @Controller('bookings')
@@ -25,6 +32,20 @@ export class BookingsController {
   @Get()
   findAll(@Query() query: QueryBookingDto) {
     return this.bookingsService.findAll(query);
+  }
+
+  @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'DISPATCHER')
+  findOne(@Param('id') id: string) {
+    return this.bookingsService.findOne(id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'DISPATCHER')
+  update(@Param('id') id: string, @Body() updateBookingDto: UpdateBookingDto) {
+    return this.bookingsService.update(id, updateBookingDto);
   }
 
   @Patch(':id/assign-driver')
