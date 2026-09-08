@@ -1,12 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -14,39 +7,606 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Booking {
-  id                String   @id @default(uuid())
-  bookingReference  String
-  customerName      String
-  customerPhone     String
-  customerEmail     String?
-  pickupAddress     String
-  dropoffAddress    String
-  pickupDatetime    DateTime
-  journeyType       String?
-  passengers        Int?
-  luggage           Int?
-  notes             String?
-  status            String   @default("PENDING")
+// ======================================================
+// ENUMS
+// ======================================================
 
-  assignedDriverId  String?
-  assignedDriver    Driver?  @relation(fields: [assignedDriverId], references: [id])
-
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+enum BookingStatus {
+  PENDING
+  ASSIGNED
+  ACCEPTED
+  ARRIVED
+  STARTED
+  COMPLETED
+  CANCELLED
+  REJECTED
 }
 
+enum DriverStatus {
+  AVAILABLE
+  BUSY
+  OFFLINE
+  INACTIVE
+}
+
+enum DriverAccountStatus {
+  ACTIVE
+  HOLD
+  SUSPENDED
+  CLOSED
+}
+
+enum VehicleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DocumentStatus {
+  ACTIVE
+  EXPIRED
+  INACTIVE
+}
+
+enum UserRole {
+  ADMIN
+  DISPATCHER
+  DRIVER
+}
+
+// ======================================================
+// BOOKING
+// ======================================================
+
+model Booking {
+  id               String @id @default(uuid())
+  bookingReference String
+
+  // --------------------------------------------------
+  // LEGACY / COMPATIBILITY CUSTOMER FIELDS
+  // Keep these because existing admin + dispatch uses them
+  // --------------------------------------------------
+
+  customerName  String
+  customerPhone String
+  customerEmail String?
+
+  // --------------------------------------------------
+  // ACCOUNT ALLOCATION
+  // --------------------------------------------------
+
+  accountId String?
+  account   ClientAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  costCenter       String?
+  invoiceRef       String?
+  jobStatus        String? @default("CONFIRMED")
+  salesman         String?
+  nameCardOverride String?
+  nameCardFileUrl  String?
+
+  // --------------------------------------------------
+  // JOURNEY
+  // --------------------------------------------------
+
+  pickupAddress  String
+  dropoffAddress String
+  pickupDatetime DateTime
+
+  journeyType String?
+
+  passengers Int?
+  luggage    Int?
+
+  bigLuggage   Int @default(0)
+  smallLuggage Int @default(0)
+
+  babySeats    Int @default(0)
+  childSeats   Int @default(0)
+  boosterSeats Int @default(0)
+
+  // Existing general notes field
+  notes String?
+
+  // Explicit driver-facing note
+  driverNote String?
+
+  // --------------------------------------------------
+  // ROUTE / VEHICLE REQUIREMENTS
+  // --------------------------------------------------
+
+  preferredVehicleCategory String?
+  requestedDriverType      String?
+
+  routeDistanceMeters  Int?
+  routeDurationSeconds Int?
+
+  // --------------------------------------------------
+  // OPERATIONAL BOOKING STATUS
+  // This is separate from jobStatus above.
+  // --------------------------------------------------
+
+  status BookingStatus @default(PENDING)
+
+  assignedDriverId String?
+  assignedDriver   Driver? @relation(fields: [assignedDriverId], references: [id])
+
+  acceptedAt  DateTime?
+  arrivedAt   DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  rejectedAt  DateTime?
+  cancelledAt DateTime?
+
+  // Used by current scheduling conflict engine
+  estimatedDurationMinutes Int @default(120)
+
+  // --------------------------------------------------
+  // BOOKERS / PASSENGERS / VIAS / FINANCE
+  // --------------------------------------------------
+
+  bookers        BookingBooker[]
+  passengersList BookingPassenger[]
+  vias           BookingVia[]
+
+  finance BookingFinance?
+
+  bookingStatusHistories BookingStatusHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([assignedDriverId])
+  @@index([status])
+  @@index([pickupDatetime])
+}
+
+model ClientAccount {
+  id String @id @default(uuid())
+
+  name String
+
+  accountCode String?
+
+  email String?
+  phone String?
+
+  billingAddress String?
+
+  notes String?
+
+  isActive Boolean @default(true)
+
+  bookers    Booker[]
+  passengers Passenger[]
+  bookings   Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model Booker {
+  id String @id @default(uuid())
+
+  accountId String?
+  account   ClientAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  firstName String?
+  lastName  String?
+
+  name String
+
+  phone String?
+  email String?
+
+  notes String?
+
+  bookings BookingBooker[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([name])
+  @@index([email])
+}
+
+model Passenger {
+  id String @id @default(uuid())
+
+  accountId String?
+  account   ClientAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  firstName String?
+  lastName  String?
+
+  name String
+
+  phone String?
+  email String?
+
+  notes String?
+
+  bookings BookingPassenger[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([name])
+  @@index([email])
+}
+
+model BookingBooker {
+  id String @id @default(uuid())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  bookerId String
+  booker   Booker @relation(fields: [bookerId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean @default(false)
+  position  Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([bookingId, bookerId])
+  @@index([bookingId])
+  @@index([bookerId])
+}
+
+model BookingPassenger {
+  id String @id @default(uuid())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  passengerId String
+  passenger   Passenger @relation(fields: [passengerId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean @default(false)
+  position  Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([bookingId, passengerId])
+  @@index([bookingId])
+  @@index([passengerId])
+}
+
+model BookingVia {
+  id String @id @default(uuid())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  address String
+
+  position Int @default(0)
+
+  latitude  Float?
+  longitude Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([position])
+}
+
+model BookingFinance {
+  id String @id @default(uuid())
+
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  // --------------------------------------------------
+  // CLIENT SIDE
+  // --------------------------------------------------
+
+  clientQuote         Float?
+  clientWaitingCharge Float?
+  clientParking       Float?
+  clientCongestion    Float?
+  clientDiscount      Float?
+
+  clientTotal Float?
+
+  clientAdminFee Float?
+
+  clientNet Float?
+
+  clientVat        Float?
+  clientVatPercent Float?
+
+  clientTotalAmount Float?
+
+  clientWaitingIncluded Boolean @default(false)
+  clientParkingIncluded Boolean @default(false)
+  clientPriceOverride   Boolean @default(false)
+
+  // --------------------------------------------------
+  // DRIVER SIDE
+  // --------------------------------------------------
+
+  driverCost       Float?
+  driverWaitingPay Float?
+  driverParking    Float?
+  driverCongestion Float?
+
+  driverTotal Float?
+
+  driverWaitingIncluded Boolean @default(false)
+  driverParkingIncluded Boolean @default(false)
+
+  driverPayAsStandard Boolean @default(false)
+  driverPriceOverride Boolean @default(false)
+
+  // --------------------------------------------------
+  // PAYMENT
+  // --------------------------------------------------
+
+  paymentType String?
+
+  // --------------------------------------------------
+  // NOTES
+  // --------------------------------------------------
+
+  financeNote String?
+  invoiceNote String?
+  extraNote   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ======================================================
+// DRIVER
+// ======================================================
+
 model Driver {
-  id              String    @id @default(uuid())
-  name            String
-  phone           String
-  photo           String?
-  vehicleName     String?
-  vehicleNumber   String?
-  status          String    @default("AVAILABLE")
+  id String @id @default(uuid())
 
-  bookings        Booking[]
+  // Existing compatibility fields
+  name          String
+  phone         String
+  photo         String?
+  vehicleName   String?
+  vehicleNumber String?
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  // Personal Details
+  driverType String?
+
+  firstName String?
+  lastName  String?
+
+  alternatePhone String?
+  dateOfBirth    DateTime?
+  email          String?
+
+  streetTown String?
+  postCode   String?
+
+  companyJoiningDate DateTime?
+  taxInformation     String?
+
+  // Account Details
+  accountStatus DriverAccountStatus @default(ACTIVE)
+
+  activeDate DateTime?
+
+  callSign String? @unique
+
+  driverGrade String? @default("Standard")
+
+  // Operational status
+  status DriverStatus @default(AVAILABLE)
+
+  // Experience Details
+  dvlaCode String?
+
+  drivingLicencePoints Int?
+
+  drivingSinceMonth Int?
+  drivingSinceYear  Int?
+
+  previouslyWorkedCompanies String?
+
+  // Bank & Finance
+  bankName          String?
+  accountHolderName String?
+  accountNumber     String?
+  sortCode          String?
+
+  signedProofDocumentUrl String?
+
+  statementCycle String?
+  paymentCycle   String?
+  paymentDueDate String?
+
+  defaultCommission Float?
+
+  // Notes
+  profileNote    String?
+  controllerNote String?
+
+  // GPS
+  latitude           Float?
+  longitude          Float?
+  lastLocationUpdate DateTime?
+
+  // Driver App Access
+  appAccessEnabled Boolean   @default(false)
+  appAccessSentAt  DateTime?
+
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  // Relations
+  bookings  Booking[]
+  vehicles  Vehicle[]
+  documents DriverDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([accountStatus])
+  @@index([phone])
+}
+
+// ======================================================
+// DRIVER DOCUMENTS
+// ======================================================
+
+model DriverDocument {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  // Examples:
+  // DRIVING_LICENCE
+  // NATIONAL_INSURANCE
+  // PCO_CARD
+  // PCO_PAPER
+  documentType String
+
+  title   String?
+  fileUrl String?
+
+  status DocumentStatus @default(ACTIVE)
+
+  issueDate  DateTime?
+  startDate  DateTime?
+  expiryDate DateTime?
+
+  documentNumber String?
+  postCode       String?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([documentType])
+  @@index([status])
+  @@index([expiryDate])
+}
+
+// ======================================================
+// VEHICLE
+// ======================================================
+
+model Vehicle {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  vehicleCategory String?
+  vehicleType     String
+
+  registrationNumber String
+
+  keeperName    String?
+  keeperAddress String?
+
+  purchaseDate       DateTime?
+  companyJoiningDate DateTime?
+
+  status VehicleStatus @default(ACTIVE)
+
+  isPrimary Boolean @default(false)
+
+  notes String?
+
+  documents VehicleDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([registrationNumber])
+  @@index([status])
+}
+
+// ======================================================
+// VEHICLE DOCUMENTS
+// ======================================================
+
+model VehicleDocument {
+  id String @id @default(uuid())
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  // Examples:
+  // INSURANCE_CERTIFICATE
+  // VEHICLE_PCO_LICENCE
+  // LOG_BOOK
+  // MOT_CERTIFICATE
+  documentType String
+
+  title   String?
+  fileUrl String?
+
+  status DocumentStatus @default(ACTIVE)
+
+  issueDate  DateTime?
+  startDate  DateTime?
+  expiryDate DateTime?
+
+  documentNumber String?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@index([documentType])
+  @@index([status])
+  @@index([expiryDate])
+}
+
+// ======================================================
+// BOOKING STATUS HISTORY
+// ======================================================
+
+model BookingStatusHistory {
+  id String @id @default(uuid())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  status BookingStatus
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+// ======================================================
+// USER
+// ======================================================
+
+model User {
+  id       String   @id @default(uuid())
+  name     String
+  email    String   @unique
+  password String
+  role     UserRole @default(DISPATCHER)
+
+  lastLoginAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  driver Driver?
 }
