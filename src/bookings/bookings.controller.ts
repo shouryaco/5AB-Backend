@@ -20,37 +20,53 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'DISPATCHER')
 @Controller('bookings')
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
+
+  /* =====================================================
+     CREATE
+  ===================================================== */
 
   @Post()
   create(@Body() createBookingDto: CreateBookingDto) {
     return this.bookingsService.create(createBookingDto);
   }
 
+  /* =====================================================
+     LIST
+  ===================================================== */
+
   @Get()
   findAll(@Query() query: QueryBookingDto) {
     return this.bookingsService.findAll(query);
   }
 
+  /* =====================================================
+     SINGLE BOOKING
+  ===================================================== */
+
   @Get(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
   findOne(@Param('id') id: string) {
     return this.bookingsService.findOne(id);
   }
 
+  /* =====================================================
+     UPDATE
+  ===================================================== */
+
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
   update(@Param('id') id: string, @Body() updateBookingDto: UpdateBookingDto) {
     return this.bookingsService.update(id, updateBookingDto);
   }
 
+  /* =====================================================
+     DRIVER ASSIGNMENT
+  ===================================================== */
+
   @Patch(':id/assign-driver')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
   assignDriver(
     @Param('id') bookingId: string,
     @Body() assignDriverDto: AssignDriverDto,
@@ -58,10 +74,23 @@ export class BookingsController {
     return this.bookingsService.assignDriver(bookingId, assignDriverDto);
   }
 
+  /* =====================================================
+     CANCELLATION
+  ===================================================== */
+
   @Patch(':id/cancel')
   cancelBooking(@Param('id') id: string) {
     return this.bookingsService.cancelBooking(id);
   }
+
+  /* =====================================================
+     BOOKING LIFECYCLE
+
+     These routes are currently restricted to ADMIN and
+     DISPATCHER. Do not add DRIVER here until driver-specific
+     ownership checks exist, otherwise a driver could call a
+     lifecycle endpoint for another driver's booking by ID.
+  ===================================================== */
 
   @Patch(':id/accept')
   acceptBooking(@Param('id') id: string) {

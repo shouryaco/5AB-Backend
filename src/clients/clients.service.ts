@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import { isUUID } from 'class-validator';
+
 import { PrismaService } from '../prisma/prisma.service';
 
 import {
@@ -33,10 +35,32 @@ export class ClientsService {
     return cleaned || undefined;
   }
 
+  private requireNonEmptyString(value: string, fieldLabel: string) {
+    const cleaned = value.trim();
+
+    if (!cleaned) {
+      throw new BadRequestException(`${fieldLabel} is required`);
+    }
+
+    return cleaned;
+  }
+
+  private validateOptionalAccountId(accountId?: string) {
+    if (!accountId) {
+      return;
+    }
+
+    if (!isUUID(accountId)) {
+      throw new BadRequestException('Invalid client account ID');
+    }
+  }
+
   private async ensureAccountExists(accountId?: string) {
     if (!accountId) {
       return;
     }
+
+    this.validateOptionalAccountId(accountId);
 
     const account = await this.prisma.clientAccount.findUnique({
       where: {
@@ -62,12 +86,16 @@ export class ClientsService {
 
     let activeValue: boolean | undefined;
 
-    if (active === 'true') {
-      activeValue = true;
-    }
-
-    if (active === 'false') {
-      activeValue = false;
+    if (active !== undefined && active !== '') {
+      if (active === 'true') {
+        activeValue = true;
+      } else if (active === 'false') {
+        activeValue = false;
+      } else {
+        throw new BadRequestException(
+          'Active filter must be either true or false',
+        );
+      }
     }
 
     return this.prisma.clientAccount.findMany({
@@ -130,6 +158,10 @@ export class ClientsService {
   }
 
   async getAccount(id: string) {
+    if (!isUUID(id)) {
+      throw new BadRequestException('Invalid client account ID');
+    }
+
     const account = await this.prisma.clientAccount.findUnique({
       where: {
         id,
@@ -164,11 +196,7 @@ export class ClientsService {
   }
 
   async createAccount(dto: CreateClientAccountDto) {
-    const name = dto.name.trim();
-
-    if (!name) {
-      throw new BadRequestException('Account name is required');
-    }
+    const name = this.requireNonEmptyString(dto.name, 'Account name');
 
     return this.prisma.clientAccount.create({
       data: {
@@ -192,54 +220,50 @@ export class ClientsService {
   async updateAccount(id: string, dto: UpdateClientAccountDto) {
     await this.getAccount(id);
 
+    const data: {
+      name?: string;
+      accountCode?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      billingAddress?: string | null;
+      notes?: string | null;
+      isActive?: boolean;
+    } = {};
+
+    if (dto.name !== undefined) {
+      data.name = this.requireNonEmptyString(dto.name, 'Account name');
+    }
+
+    if (dto.accountCode !== undefined) {
+      data.accountCode = dto.accountCode.trim() || null;
+    }
+
+    if (dto.email !== undefined) {
+      data.email = dto.email.trim() || null;
+    }
+
+    if (dto.phone !== undefined) {
+      data.phone = dto.phone.trim() || null;
+    }
+
+    if (dto.billingAddress !== undefined) {
+      data.billingAddress = dto.billingAddress.trim() || null;
+    }
+
+    if (dto.notes !== undefined) {
+      data.notes = dto.notes.trim() || null;
+    }
+
+    if (dto.isActive !== undefined) {
+      data.isActive = dto.isActive;
+    }
+
     return this.prisma.clientAccount.update({
       where: {
         id,
       },
 
-      data: {
-        ...(dto.name !== undefined
-          ? {
-              name: dto.name.trim(),
-            }
-          : {}),
-
-        ...(dto.accountCode !== undefined
-          ? {
-              accountCode: dto.accountCode.trim() || null,
-            }
-          : {}),
-
-        ...(dto.email !== undefined
-          ? {
-              email: dto.email.trim() || null,
-            }
-          : {}),
-
-        ...(dto.phone !== undefined
-          ? {
-              phone: dto.phone.trim() || null,
-            }
-          : {}),
-
-        ...(dto.billingAddress !== undefined
-          ? {
-              billingAddress: dto.billingAddress.trim() || null,
-            }
-          : {}),
-
-        ...(dto.notes !== undefined
-          ? {
-              notes: dto.notes.trim() || null,
-            }
-          : {}),
-
-        ...(dto.isActive !== undefined
-          ? {
-              isActive: dto.isActive,
-            }
-          : {}),
-      },
+      data,
     });
   }
 
@@ -248,6 +272,10 @@ export class ClientsService {
   ===================================================== */
 
   async getBookers(accountId?: string, search?: string) {
+    if (accountId) {
+      this.validateOptionalAccountId(accountId);
+    }
+
     const cleanSearch = search?.trim() || undefined;
 
     return this.prisma.booker.findMany({
@@ -317,6 +345,10 @@ export class ClientsService {
   }
 
   async getBooker(id: string) {
+    if (!isUUID(id)) {
+      throw new BadRequestException('Invalid booker ID');
+    }
+
     const booker = await this.prisma.booker.findUnique({
       where: {
         id,
@@ -343,11 +375,7 @@ export class ClientsService {
   async createBooker(dto: CreateBookerDto) {
     await this.ensureAccountExists(dto.accountId);
 
-    const name = dto.name.trim();
-
-    if (!name) {
-      throw new BadRequestException('Booker name is required');
-    }
+    const name = this.requireNonEmptyString(dto.name, 'Booker name');
 
     return this.prisma.booker.create({
       data: {
@@ -385,54 +413,50 @@ export class ClientsService {
       await this.ensureAccountExists(dto.accountId);
     }
 
+    const data: {
+      accountId?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      name?: string;
+      phone?: string | null;
+      email?: string | null;
+      notes?: string | null;
+    } = {};
+
+    if (dto.accountId !== undefined) {
+      data.accountId = dto.accountId || null;
+    }
+
+    if (dto.firstName !== undefined) {
+      data.firstName = dto.firstName.trim() || null;
+    }
+
+    if (dto.lastName !== undefined) {
+      data.lastName = dto.lastName.trim() || null;
+    }
+
+    if (dto.name !== undefined) {
+      data.name = this.requireNonEmptyString(dto.name, 'Booker name');
+    }
+
+    if (dto.phone !== undefined) {
+      data.phone = dto.phone.trim() || null;
+    }
+
+    if (dto.email !== undefined) {
+      data.email = dto.email.trim() || null;
+    }
+
+    if (dto.notes !== undefined) {
+      data.notes = dto.notes.trim() || null;
+    }
+
     return this.prisma.booker.update({
       where: {
         id,
       },
 
-      data: {
-        ...(dto.accountId !== undefined
-          ? {
-              accountId: dto.accountId || null,
-            }
-          : {}),
-
-        ...(dto.firstName !== undefined
-          ? {
-              firstName: dto.firstName.trim() || null,
-            }
-          : {}),
-
-        ...(dto.lastName !== undefined
-          ? {
-              lastName: dto.lastName.trim() || null,
-            }
-          : {}),
-
-        ...(dto.name !== undefined
-          ? {
-              name: dto.name.trim(),
-            }
-          : {}),
-
-        ...(dto.phone !== undefined
-          ? {
-              phone: dto.phone.trim() || null,
-            }
-          : {}),
-
-        ...(dto.email !== undefined
-          ? {
-              email: dto.email.trim() || null,
-            }
-          : {}),
-
-        ...(dto.notes !== undefined
-          ? {
-              notes: dto.notes.trim() || null,
-            }
-          : {}),
-      },
+      data,
 
       include: {
         account: {
@@ -451,6 +475,10 @@ export class ClientsService {
   ===================================================== */
 
   async getPassengers(accountId?: string, search?: string) {
+    if (accountId) {
+      this.validateOptionalAccountId(accountId);
+    }
+
     const cleanSearch = search?.trim() || undefined;
 
     return this.prisma.passenger.findMany({
@@ -520,6 +548,10 @@ export class ClientsService {
   }
 
   async getPassenger(id: string) {
+    if (!isUUID(id)) {
+      throw new BadRequestException('Invalid passenger ID');
+    }
+
     const passenger = await this.prisma.passenger.findUnique({
       where: {
         id,
@@ -546,11 +578,7 @@ export class ClientsService {
   async createPassenger(dto: CreatePassengerDto) {
     await this.ensureAccountExists(dto.accountId);
 
-    const name = dto.name.trim();
-
-    if (!name) {
-      throw new BadRequestException('Passenger name is required');
-    }
+    const name = this.requireNonEmptyString(dto.name, 'Passenger name');
 
     return this.prisma.passenger.create({
       data: {
@@ -588,54 +616,50 @@ export class ClientsService {
       await this.ensureAccountExists(dto.accountId);
     }
 
+    const data: {
+      accountId?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      name?: string;
+      phone?: string | null;
+      email?: string | null;
+      notes?: string | null;
+    } = {};
+
+    if (dto.accountId !== undefined) {
+      data.accountId = dto.accountId || null;
+    }
+
+    if (dto.firstName !== undefined) {
+      data.firstName = dto.firstName.trim() || null;
+    }
+
+    if (dto.lastName !== undefined) {
+      data.lastName = dto.lastName.trim() || null;
+    }
+
+    if (dto.name !== undefined) {
+      data.name = this.requireNonEmptyString(dto.name, 'Passenger name');
+    }
+
+    if (dto.phone !== undefined) {
+      data.phone = dto.phone.trim() || null;
+    }
+
+    if (dto.email !== undefined) {
+      data.email = dto.email.trim() || null;
+    }
+
+    if (dto.notes !== undefined) {
+      data.notes = dto.notes.trim() || null;
+    }
+
     return this.prisma.passenger.update({
       where: {
         id,
       },
 
-      data: {
-        ...(dto.accountId !== undefined
-          ? {
-              accountId: dto.accountId || null,
-            }
-          : {}),
-
-        ...(dto.firstName !== undefined
-          ? {
-              firstName: dto.firstName.trim() || null,
-            }
-          : {}),
-
-        ...(dto.lastName !== undefined
-          ? {
-              lastName: dto.lastName.trim() || null,
-            }
-          : {}),
-
-        ...(dto.name !== undefined
-          ? {
-              name: dto.name.trim(),
-            }
-          : {}),
-
-        ...(dto.phone !== undefined
-          ? {
-              phone: dto.phone.trim() || null,
-            }
-          : {}),
-
-        ...(dto.email !== undefined
-          ? {
-              email: dto.email.trim() || null,
-            }
-          : {}),
-
-        ...(dto.notes !== undefined
-          ? {
-              notes: dto.notes.trim() || null,
-            }
-          : {}),
-      },
+      data,
 
       include: {
         account: {

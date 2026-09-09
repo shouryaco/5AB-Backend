@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -8,7 +9,6 @@ import {
   Query,
   Req,
   UseGuards,
-  Delete,
 } from '@nestjs/common';
 
 import { DriversService } from './drivers.service';
@@ -43,10 +43,7 @@ export class DriversController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
-  create(
-    @Body()
-    createDriverDto: CreateDriverDto,
-  ) {
+  create(@Body() createDriverDto: CreateDriverDto) {
     return this.driversService.create(createDriverDto);
   }
 
@@ -79,12 +76,7 @@ export class DriversController {
   @Patch('my-status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DRIVER')
-  updateMyStatus(
-    @Req() req,
-
-    @Body()
-    updateMyStatusDto: UpdateMyStatusDto,
-  ) {
+  updateMyStatus(@Req() req, @Body() updateMyStatusDto: UpdateMyStatusDto) {
     return this.driversService.updateMyStatus(
       req.user.sub,
       updateMyStatusDto.status,
@@ -98,12 +90,7 @@ export class DriversController {
   @Patch('location')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DRIVER')
-  updateLocation(
-    @Req() req,
-
-    @Body()
-    updateLocationDto: UpdateLocationDto,
-  ) {
+  updateLocation(@Req() req, @Body() updateLocationDto: UpdateLocationDto) {
     return this.driversService.updateLocation(
       req.user.sub,
       updateLocationDto.latitude,
@@ -118,13 +105,9 @@ export class DriversController {
   @Get('nearest')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'DISPATCHER')
-  findNearestDrivers(
-    @Query()
-    nearestDriverDto: NearestDriverDto,
-  ) {
+  findNearestDrivers(@Query() nearestDriverDto: NearestDriverDto) {
     return this.driversService.findNearestDrivers(
       Number(nearestDriverDto.latitude),
-
       Number(nearestDriverDto.longitude),
     );
   }
@@ -141,64 +124,64 @@ export class DriversController {
   }
 
   /*
-   * ADMIN STATUS CONTROLS
+   * ADMIN / DISPATCHER - OPERATIONAL STATUS CONTROLS
+   *
+   * The service prevents DISPATCHER from reactivating an
+   * INACTIVE driver and prevents manual AVAILABLE/OFFLINE
+   * changes while a driver is BUSY on an active trip.
    */
 
   @Patch(':id/online')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'DISPATCHER')
-  setDriverOnline(
-    @Param('id')
-    id: string,
-  ) {
-    return this.driversService.setDriverOnline(id);
+  setDriverOnline(@Param('id') id: string, @Req() req) {
+    return this.driversService.setDriverOnline(id, req.user.role);
   }
 
   @Patch(':id/offline')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'DISPATCHER')
-  setDriverOffline(
-    @Param('id')
-    id: string,
-  ) {
-    return this.driversService.setDriverOffline(id);
+  setDriverOffline(@Param('id') id: string, @Req() req) {
+    return this.driversService.setDriverOffline(id, req.user.role);
   }
+
+  /*
+   * ADMIN ONLY - COMPLIANCE STATUS
+   */
 
   @Patch(':id/inactive')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
-  setDriverInactive(
-    @Param('id')
-    id: string,
-  ) {
+  @Roles('ADMIN')
+  setDriverInactive(@Param('id') id: string) {
     return this.driversService.setDriverInactive(id);
   }
 
   /*
-   * FULL DRIVER PROFILE
+   * ADMIN ONLY - FULL DRIVER PROFILE
+   *
+   * Full profile contains private/admin-only driver data.
+   * Dispatchers already have safe operational driver data
+   * through /drivers, /drivers/live and the dispatch board.
    */
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
-  findOne(
-    @Param('id')
-    id: string,
-  ) {
+  @Roles('ADMIN')
+  findOne(@Param('id') id: string) {
     return this.driversService.findOne(id);
   }
 
   /*
    * VEHICLE MANAGEMENT
+   *
+   * Full vehicle records include document/compliance data,
+   * so these management endpoints are ADMIN only.
    */
 
   @Get(':id/vehicles')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
-  getDriverVehicles(
-    @Param('id')
-    id: string,
-  ) {
+  @Roles('ADMIN')
+  getDriverVehicles(@Param('id') id: string) {
     return this.driversService.getDriverVehicles(id);
   }
 
@@ -206,11 +189,8 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   createVehicle(
-    @Param('id')
-    id: string,
-
-    @Body()
-    createVehicleDto: CreateVehicleDto,
+    @Param('id') id: string,
+    @Body() createVehicleDto: CreateVehicleDto,
   ) {
     return this.driversService.createVehicle(id, createVehicleDto);
   }
@@ -219,14 +199,9 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   updateVehicle(
-    @Param('driverId')
-    driverId: string,
-
-    @Param('vehicleId')
-    vehicleId: string,
-
-    @Body()
-    updateVehicleDto: UpdateVehicleDto,
+    @Param('driverId') driverId: string,
+    @Param('vehicleId') vehicleId: string,
+    @Body() updateVehicleDto: UpdateVehicleDto,
   ) {
     return this.driversService.updateVehicle(
       driverId,
@@ -239,18 +214,19 @@ export class DriversController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   deleteVehicle(
-    @Param('driverId')
-    driverId: string,
-
-    @Param('vehicleId')
-    vehicleId: string,
+    @Param('driverId') driverId: string,
+    @Param('vehicleId') vehicleId: string,
   ) {
     return this.driversService.deleteVehicle(driverId, vehicleId);
   }
 
+  /*
+   * DRIVER DOCUMENTS - ADMIN ONLY
+   */
+
   @Get(':id/documents')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
+  @Roles('ADMIN')
   getDriverDocuments(@Param('id') driverId: string) {
     return this.driversService.getDriverDocuments(driverId);
   }
@@ -286,9 +262,13 @@ export class DriversController {
     return this.driversService.deleteDriverDocument(driverId, documentId);
   }
 
+  /*
+   * VEHICLE DOCUMENTS - ADMIN ONLY
+   */
+
   @Get(':driverId/vehicles/:vehicleId/documents')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'DISPATCHER')
+  @Roles('ADMIN')
   getVehicleDocuments(
     @Param('driverId') driverId: string,
     @Param('vehicleId') vehicleId: string,
@@ -340,19 +320,13 @@ export class DriversController {
   }
 
   /*
-   * UPDATE DRIVER
+   * UPDATE DRIVER - ADMIN ONLY
    */
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
-  update(
-    @Param('id')
-    id: string,
-
-    @Body()
-    updateDriverDto: UpdateDriverDto,
-  ) {
+  update(@Param('id') id: string, @Body() updateDriverDto: UpdateDriverDto) {
     return this.driversService.update(id, updateDriverDto);
   }
 }

@@ -53,6 +53,60 @@ export class DriversService {
     return R * c;
   }
 
+  private validateCoordinates(latitude: number, longitude: number) {
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      throw new BadRequestException('Invalid latitude or longitude');
+    }
+  }
+
+  private async getDriverStatusRecord(driverId: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: {
+        id: driverId,
+      },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!driver) {
+      throw new NotFoundException('Driver not found');
+    }
+
+    return driver;
+  }
+
+  private async getDriverForApp(userId: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: {
+        userId,
+      },
+      select: {
+        id: true,
+        status: true,
+        appAccessEnabled: true,
+      },
+    });
+
+    if (!driver) {
+      throw new BadRequestException('Driver profile not found');
+    }
+
+    if (!driver.appAccessEnabled) {
+      throw new BadRequestException('Driver app access is disabled');
+    }
+
+    return driver;
+  }
+
   /*
    * =====================================================
    * CREATE DRIVER
@@ -329,6 +383,47 @@ export class DriversService {
       updateVehicleDto;
 
     return this.prisma.$transaction(async (tx) => {
+      let replacementVehicle: {
+        id: string;
+        vehicleType: string;
+        registrationNumber: string;
+      } | null = null;
+
+      /*
+       * A driver with vehicles should always have one primary vehicle.
+       * If the current primary vehicle is explicitly unset, promote
+       * another vehicle in the same transaction.
+       */
+      if (isPrimary === false && vehicle.isPrimary) {
+        replacementVehicle = await tx.vehicle.findFirst({
+          where: {
+            driverId,
+            id: {
+              not: vehicleId,
+            },
+          },
+          orderBy: [
+            {
+              status: 'asc',
+            },
+            {
+              createdAt: 'desc',
+            },
+          ],
+          select: {
+            id: true,
+            vehicleType: true,
+            registrationNumber: true,
+          },
+        });
+
+        if (!replacementVehicle) {
+          throw new BadRequestException(
+            'The only vehicle cannot be removed as primary',
+          );
+        }
+      }
+
       if (isPrimary === true) {
         await tx.vehicle.updateMany({
           where: {
@@ -372,9 +467,32 @@ export class DriversService {
         },
       });
 
+      if (replacementVehicle) {
+        await tx.vehicle.update({
+          where: {
+            id: replacementVehicle.id,
+          },
+          data: {
+            isPrimary: true,
+          },
+        });
+
+        await tx.driver.update({
+          where: {
+            id: driverId,
+          },
+          data: {
+            vehicleName: replacementVehicle.vehicleType,
+            vehicleNumber: replacementVehicle.registrationNumber,
+          },
+        });
+
+        return updatedVehicle;
+      }
+
       /*
-       * Sync compatibility fields if this
-       * vehicle is primary.
+       * Keep compatibility fields synchronized whenever the updated
+       * vehicle remains/becomes primary.
        */
       if (updatedVehicle.isPrimary) {
         await tx.driver.update({
@@ -939,7 +1057,25 @@ export class DriversService {
           password?: string;
         } = {};
 
-        if (updateDriverDto.email) {
+        if (
+          updateDriverDto.email &&
+          updateDriverDto.email !== currentDriver.user.email
+        ) {
+          const existingUser = await tx.user.findUnique({
+            where: {
+              email: updateDriverDto.email,
+            },
+            select: {
+              id: true,
+            },
+          });
+
+          if (existingUser && existingUser.id !== currentDriver.user.id) {
+            throw new BadRequestException(
+              'A user with this email already exists',
+            );
+          }
+
           userUpdate.email = updateDriverDto.email;
         }
 
@@ -1139,6 +1275,8 @@ export class DriversService {
    */
 
   async updateDriverStatus(driverId: string, status: DriverStatus) {
+    await this.getDriverStatusRecord(driverId);
+
     return this.prisma.driver.update({
       where: {
         id: driverId,
@@ -1150,16 +1288,79 @@ export class DriversService {
     });
   }
 
-  async setDriverOnline(driverId: string) {
-    return this.updateDriverStatus(driverId, DriverStatus.AVAILABLE);
+  async setDriverOnline(driverId: string, requesterRole?: string) {
+    const driver = await this.getDriverStatusRecord(driverId);
+
+    if (driver.status === DriverStatus.BUSY) {
+      throw new BadRequestException(
+        'A busy driver cannot be manually marked available',
+      );
+    }
+
+    if (
+      driver.status === DriverStatus.INACTIVE &&
+      requesterRole !== UserRole.ADMIN
+    ) {
+      throw new BadRequestException(
+        'Inactive drivers can only be reactivated by an admin',
+      );
+    }
+
+    return this.prisma.driver.update({
+      where: {
+        id: driverId,
+      },
+      data: {
+        status: DriverStatus.AVAILABLE,
+      },
+    });
   }
 
-  async setDriverOffline(driverId: string) {
-    return this.updateDriverStatus(driverId, DriverStatus.OFFLINE);
+  async setDriverOffline(driverId: string, requesterRole?: string) {
+    const driver = await this.getDriverStatusRecord(driverId);
+
+    if (driver.status === DriverStatus.BUSY) {
+      throw new BadRequestException(
+        'A busy driver cannot be manually marked offline',
+      );
+    }
+
+    if (
+      driver.status === DriverStatus.INACTIVE &&
+      requesterRole !== UserRole.ADMIN
+    ) {
+      throw new BadRequestException(
+        'Inactive drivers can only be changed by an admin',
+      );
+    }
+
+    return this.prisma.driver.update({
+      where: {
+        id: driverId,
+      },
+      data: {
+        status: DriverStatus.OFFLINE,
+      },
+    });
   }
 
   async setDriverInactive(driverId: string) {
-    return this.updateDriverStatus(driverId, DriverStatus.INACTIVE);
+    const driver = await this.getDriverStatusRecord(driverId);
+
+    if (driver.status === DriverStatus.BUSY) {
+      throw new BadRequestException(
+        'A busy driver cannot be made inactive until the active trip is finished',
+      );
+    }
+
+    return this.prisma.driver.update({
+      where: {
+        id: driverId,
+      },
+      data: {
+        status: DriverStatus.INACTIVE,
+      },
+    });
   }
 
   /*
@@ -1169,23 +1370,75 @@ export class DriversService {
    */
 
   async getMyBookings(userId: string) {
-    const driver = await this.prisma.driver.findUnique({
-      where: {
-        userId,
-      },
-    });
-
-    if (!driver) {
-      throw new BadRequestException('Driver profile not found');
-    }
+    const driver = await this.getDriverForApp(userId);
 
     return this.prisma.booking.findMany({
       where: {
         assignedDriverId: driver.id,
       },
 
-      include: {
-        bookingStatusHistories: true,
+      select: {
+        id: true,
+        bookingReference: true,
+
+        customerName: true,
+        customerPhone: true,
+
+        pickupAddress: true,
+        dropoffAddress: true,
+        pickupDatetime: true,
+
+        journeyType: true,
+
+        passengers: true,
+        luggage: true,
+        bigLuggage: true,
+        smallLuggage: true,
+        babySeats: true,
+        childSeats: true,
+        boosterSeats: true,
+
+        driverNote: true,
+
+        preferredVehicleCategory: true,
+
+        routeDistanceMeters: true,
+        routeDurationSeconds: true,
+        estimatedDurationMinutes: true,
+
+        status: true,
+
+        acceptedAt: true,
+        arrivedAt: true,
+        startedAt: true,
+        completedAt: true,
+        cancelledAt: true,
+        rejectedAt: true,
+
+        vias: {
+          orderBy: {
+            position: 'asc',
+          },
+          select: {
+            id: true,
+            address: true,
+            position: true,
+            latitude: true,
+            longitude: true,
+          },
+        },
+
+        bookingStatusHistories: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+          select: {
+            id: true,
+            status: true,
+            notes: true,
+            createdAt: true,
+          },
+        },
       },
 
       orderBy: {
@@ -1201,14 +1454,18 @@ export class DriversService {
    */
 
   async updateMyStatus(userId: string, status: DriverStatus) {
-    const driver = await this.prisma.driver.findUnique({
-      where: {
-        userId,
-      },
-    });
+    const driver = await this.getDriverForApp(userId);
 
-    if (!driver) {
-      throw new BadRequestException('Driver profile not found');
+    if (driver.status === DriverStatus.INACTIVE) {
+      throw new BadRequestException(
+        'Inactive driver status is admin controlled',
+      );
+    }
+
+    if (driver.status === DriverStatus.BUSY) {
+      throw new BadRequestException(
+        'Status cannot be changed manually during an active trip',
+      );
     }
 
     if (status === DriverStatus.BUSY) {
@@ -1237,14 +1494,14 @@ export class DriversService {
    */
 
   async updateLocation(userId: string, latitude: number, longitude: number) {
-    const driver = await this.prisma.driver.findUnique({
-      where: {
-        userId,
-      },
-    });
+    this.validateCoordinates(latitude, longitude);
 
-    if (!driver) {
-      throw new BadRequestException('Driver profile not found');
+    const driver = await this.getDriverForApp(userId);
+
+    if (driver.status === DriverStatus.INACTIVE) {
+      throw new BadRequestException(
+        'Inactive drivers cannot update live location',
+      );
     }
 
     return this.prisma.driver.update({
@@ -1267,6 +1524,8 @@ export class DriversService {
    */
 
   async findNearestDrivers(latitude: number, longitude: number) {
+    this.validateCoordinates(latitude, longitude);
+
     const drivers = await this.prisma.driver.findMany({
       where: {
         status: DriverStatus.AVAILABLE,
@@ -1278,6 +1537,26 @@ export class DriversService {
         longitude: {
           not: null,
         },
+      },
+
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        photo: true,
+
+        driverType: true,
+        callSign: true,
+        driverGrade: true,
+
+        vehicleName: true,
+        vehicleNumber: true,
+
+        status: true,
+
+        latitude: true,
+        longitude: true,
+        lastLocationUpdate: true,
       },
     });
 
@@ -1307,6 +1586,18 @@ export class DriversService {
 
   async getLiveDrivers() {
     return this.prisma.driver.findMany({
+      where: {
+        status: {
+          not: DriverStatus.INACTIVE,
+        },
+        latitude: {
+          not: null,
+        },
+        longitude: {
+          not: null,
+        },
+      },
+
       select: {
         id: true,
         name: true,
