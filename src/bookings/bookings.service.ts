@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -12,14 +16,23 @@ import { WebsocketGateway } from '../websocket/websocket.gateway';
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { DriverStatus } from '../common/enums/driver-status.enum';
 
-import { DriversService } from '../drivers/drivers.service';
+const safeAssignedDriverSelect = {
+  id: true,
+  name: true,
+  phone: true,
+  vehicleName: true,
+  vehicleNumber: true,
+  status: true,
+  driverType: true,
+  callSign: true,
+  driverGrade: true,
+} as const;
 
 @Injectable()
 export class BookingsService {
   constructor(
     private prisma: PrismaService,
     private websocketGateway: WebsocketGateway,
-    private driversService: DriversService,
   ) {}
 
   /* =====================================================
@@ -93,7 +106,12 @@ export class BookingsService {
     ===================================================== */
 
     if (bookers && bookers.length > 0) {
-      const bookerIds = [...new Set(bookers.map((item) => item.bookerId))];
+      const rawBookerIds = bookers.map((item) => item.bookerId);
+      const bookerIds = [...new Set(rawBookerIds)];
+
+      if (bookerIds.length !== rawBookerIds.length) {
+        throw new BadRequestException('Duplicate bookers are not allowed');
+      }
 
       const existingBookers = await this.prisma.booker.findMany({
         where: {
@@ -131,9 +149,12 @@ export class BookingsService {
     ===================================================== */
 
     if (passengersList && passengersList.length > 0) {
-      const passengerIds = [
-        ...new Set(passengersList.map((item) => item.passengerId)),
-      ];
+      const rawPassengerIds = passengersList.map((item) => item.passengerId);
+      const passengerIds = [...new Set(rawPassengerIds)];
+
+      if (passengerIds.length !== rawPassengerIds.length) {
+        throw new BadRequestException('Duplicate passengers are not allowed');
+      }
 
       const existingPassengers = await this.prisma.passenger.findMany({
         where: {
@@ -490,7 +511,9 @@ export class BookingsService {
       include: {
         account: true,
 
-        assignedDriver: true,
+        assignedDriver: {
+          select: safeAssignedDriverSelect,
+        },
 
         bookers: {
           orderBy: {
@@ -616,9 +639,18 @@ export class BookingsService {
       };
     }
 
-    const currentPage = Number(page);
+    const parsedPage = Number(page);
+    const parsedLimit = Number(limit);
 
-    const perPage = Number(limit);
+    const currentPage =
+      Number.isFinite(parsedPage) && parsedPage > 0
+        ? Math.floor(parsedPage)
+        : 1;
+
+    const perPage =
+      Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(Math.floor(parsedLimit), 100)
+        : 20;
 
     const [bookings, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -767,7 +799,7 @@ export class BookingsService {
     });
 
     if (!booking) {
-      throw new BadRequestException('Booking not found');
+      throw new NotFoundException('Booking not found');
     }
 
     return booking;
@@ -789,7 +821,7 @@ export class BookingsService {
     });
 
     if (!existingBooking) {
-      throw new BadRequestException('Booking not found');
+      throw new NotFoundException('Booking not found');
     }
 
     if (
@@ -850,7 +882,10 @@ export class BookingsService {
        ACCOUNT VALIDATION
     ===================================================== */
 
-    if (effectiveAccountId) {
+    const accountChanged =
+      accountId !== undefined && accountId !== existingBooking.accountId;
+
+    if (effectiveAccountId && accountChanged) {
       const account = await this.prisma.clientAccount.findUnique({
         where: {
           id: effectiveAccountId,
@@ -980,7 +1015,7 @@ export class BookingsService {
        DRIVER VALIDATION + CONFLICT CHECK
     ===================================================== */
 
-    if (assignedDriverId !== undefined && assignedDriverId !== null) {
+    if (assignmentChanged && assignedDriverId) {
       const driver = await this.prisma.driver.findUnique({
         where: {
           id: assignedDriverId,
@@ -1159,7 +1194,7 @@ export class BookingsService {
       data.estimatedDurationMinutes = bookingData.estimatedDurationMinutes;
     }
 
-    if (assignedDriverId !== undefined) {
+    if (assignmentChanged) {
       data.assignedDriver = assignedDriverId
         ? {
             connect: {
@@ -1490,20 +1525,6 @@ export class BookingsService {
   async assignDriver(bookingId: string, assignDriverDto: AssignDriverDto) {
     const { driverId } = assignDriverDto;
 
-    const driver = await this.prisma.driver.findUnique({
-      where: {
-        id: driverId,
-      },
-    });
-
-    if (!driver) {
-      throw new BadRequestException('Driver not found');
-    }
-
-    if (driver.status === DriverStatus.INACTIVE) {
-      throw new BadRequestException('Driver is inactive');
-    }
-
     const booking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
@@ -1511,7 +1532,42 @@ export class BookingsService {
     });
 
     if (!booking) {
-      throw new BadRequestException('Booking not found');
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (
+      ![BookingStatus.PENDING, BookingStatus.ASSIGNED].includes(
+        booking.status as BookingStatus,
+      )
+    ) {
+      throw new BadRequestException(
+        'Driver assignment can only be changed while a booking is Pending or Assigned',
+      );
+    }
+
+    if (
+      booking.status === BookingStatus.ASSIGNED &&
+      booking.assignedDriverId === driverId
+    ) {
+      return this.findOne(bookingId);
+    }
+
+    const driver = await this.prisma.driver.findUnique({
+      where: {
+        id: driverId,
+      },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!driver) {
+      throw new NotFoundException('Driver not found');
+    }
+
+    if (driver.status === DriverStatus.INACTIVE) {
+      throw new BadRequestException('Driver is inactive');
     }
 
     const hasConflict = await this.hasDriverConflict(
@@ -1525,30 +1581,39 @@ export class BookingsService {
       throw new BadRequestException('Driver has conflicting booking schedule');
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: {
-        id: bookingId,
-      },
+    const previousDriverId = booking.assignedDriverId;
 
-      data: {
-        assignedDriverId: driverId,
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          assignedDriverId: driverId,
+          status: BookingStatus.ASSIGNED,
+        },
+        include: {
+          assignedDriver: {
+            select: safeAssignedDriverSelect,
+          },
+        },
+      });
 
-        status: BookingStatus.ASSIGNED,
-      },
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.ASSIGNED,
+          notes:
+            previousDriverId && previousDriverId !== driverId
+              ? 'Driver reassigned'
+              : 'Driver assigned',
+        },
+      });
 
-      include: {
-        assignedDriver: true,
-      },
+      return updated;
     });
 
-    await this.createBookingHistory(
-      updatedBooking.id,
-      BookingStatus.ASSIGNED,
-      'Driver assigned',
-    );
-
     this.websocketGateway.sendBookingToDriver(driverId, updatedBooking);
-
     this.websocketGateway.notifyDispatchUpdate();
 
     return updatedBooking;
@@ -1556,14 +1621,29 @@ export class BookingsService {
 
   /* =====================================================
      GENERIC STATUS UPDATE
+
+     Kept for compatibility with any internal callers.
+     Lifecycle controller routes below do not use this method.
   ===================================================== */
 
   async updateBookingStatus(bookingId: string, status: BookingStatus) {
+    const booking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
     return this.prisma.booking.update({
       where: {
         id: bookingId,
       },
-
       data: {
         status,
       },
@@ -1572,26 +1652,58 @@ export class BookingsService {
 
   /* =====================================================
      ACCEPT BOOKING
+     ASSIGNED -> ACCEPTED
   ===================================================== */
 
   async acceptBooking(bookingId: string) {
-    const booking = await this.prisma.booking.update({
+    const existingBooking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
       },
-
-      data: {
-        status: BookingStatus.ACCEPTED,
-
-        acceptedAt: new Date(),
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
       },
     });
 
-    await this.createBookingHistory(
-      bookingId,
-      BookingStatus.ACCEPTED,
-      'Driver accepted booking',
-    );
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (existingBooking.status !== BookingStatus.ASSIGNED) {
+      throw new BadRequestException(
+        'Booking can only be accepted when it is Assigned',
+      );
+    }
+
+    if (!existingBooking.assignedDriverId) {
+      throw new BadRequestException(
+        'Booking must have an assigned driver before it can be accepted',
+      );
+    }
+
+    const booking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: BookingStatus.ACCEPTED,
+          acceptedAt: new Date(),
+        },
+      });
+
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.ACCEPTED,
+          notes: 'Driver accepted booking',
+        },
+      });
+
+      return updated;
+    });
 
     this.websocketGateway.notifyDispatchUpdate();
 
@@ -1600,39 +1712,76 @@ export class BookingsService {
 
   /* =====================================================
      ARRIVED
+     ACCEPTED -> ARRIVED
   ===================================================== */
 
   async arrivedBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({
+    const existingBooking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
       },
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
+        assignedDriver: {
+          select: {
+            status: true,
+          },
+        },
+      },
     });
 
-    if (booking?.assignedDriverId) {
-      await this.driversService.updateDriverStatus(
-        booking.assignedDriverId,
-        DriverStatus.BUSY,
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (existingBooking.status !== BookingStatus.ACCEPTED) {
+      throw new BadRequestException(
+        'Booking can only be marked Arrived after it has been Accepted',
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: {
-        id: bookingId,
-      },
+    if (!existingBooking.assignedDriverId) {
+      throw new BadRequestException(
+        'Booking must have an assigned driver before arrival',
+      );
+    }
 
-      data: {
-        status: BookingStatus.ARRIVED,
+    if (existingBooking.assignedDriver?.status === DriverStatus.INACTIVE) {
+      throw new BadRequestException('Assigned driver is inactive');
+    }
 
-        arrivedAt: new Date(),
-      },
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: BookingStatus.ARRIVED,
+          arrivedAt: new Date(),
+        },
+      });
+
+      await tx.driver.update({
+        where: {
+          id: existingBooking.assignedDriverId!,
+        },
+        data: {
+          status: DriverStatus.BUSY,
+        },
+      });
+
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.ARRIVED,
+          notes: 'Driver arrived at pickup location',
+        },
+      });
+
+      return updated;
     });
-
-    await this.createBookingHistory(
-      bookingId,
-      BookingStatus.ARRIVED,
-      'Driver arrived at pickup location',
-    );
 
     this.websocketGateway.notifyDispatchUpdate();
 
@@ -1641,39 +1790,76 @@ export class BookingsService {
 
   /* =====================================================
      START BOOKING
+     ARRIVED -> STARTED
   ===================================================== */
 
   async startBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({
+    const existingBooking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
       },
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
+        assignedDriver: {
+          select: {
+            status: true,
+          },
+        },
+      },
     });
 
-    if (booking?.assignedDriverId) {
-      await this.driversService.updateDriverStatus(
-        booking.assignedDriverId,
-        DriverStatus.BUSY,
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (existingBooking.status !== BookingStatus.ARRIVED) {
+      throw new BadRequestException(
+        'Booking can only be started after the driver has Arrived',
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: {
-        id: bookingId,
-      },
+    if (!existingBooking.assignedDriverId) {
+      throw new BadRequestException(
+        'Booking must have an assigned driver before it can start',
+      );
+    }
 
-      data: {
-        status: BookingStatus.STARTED,
+    if (existingBooking.assignedDriver?.status === DriverStatus.INACTIVE) {
+      throw new BadRequestException('Assigned driver is inactive');
+    }
 
-        startedAt: new Date(),
-      },
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: BookingStatus.STARTED,
+          startedAt: new Date(),
+        },
+      });
+
+      await tx.driver.update({
+        where: {
+          id: existingBooking.assignedDriverId!,
+        },
+        data: {
+          status: DriverStatus.BUSY,
+        },
+      });
+
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.STARTED,
+          notes: 'Journey started',
+        },
+      });
+
+      return updated;
     });
-
-    await this.createBookingHistory(
-      bookingId,
-      BookingStatus.STARTED,
-      'Journey started',
-    );
 
     this.websocketGateway.notifyDispatchUpdate();
 
@@ -1682,39 +1868,95 @@ export class BookingsService {
 
   /* =====================================================
      COMPLETE BOOKING
+     STARTED -> COMPLETED
   ===================================================== */
 
   async completeBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({
+    const existingBooking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
       },
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
+      },
     });
 
-    if (booking?.assignedDriverId) {
-      await this.driversService.updateDriverStatus(
-        booking.assignedDriverId,
-        DriverStatus.AVAILABLE,
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (existingBooking.status !== BookingStatus.STARTED) {
+      throw new BadRequestException(
+        'Booking can only be completed after the journey has Started',
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: {
-        id: bookingId,
-      },
+    if (!existingBooking.assignedDriverId) {
+      throw new BadRequestException(
+        'Booking must have an assigned driver before it can be completed',
+      );
+    }
 
-      data: {
-        status: BookingStatus.COMPLETED,
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: BookingStatus.COMPLETED,
+          completedAt: new Date(),
+        },
+      });
 
-        completedAt: new Date(),
-      },
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.COMPLETED,
+          notes: 'Trip completed',
+        },
+      });
+
+      const otherActiveBooking = await tx.booking.findFirst({
+        where: {
+          id: {
+            not: bookingId,
+          },
+          assignedDriverId: existingBooking.assignedDriverId!,
+          status: {
+            in: [BookingStatus.ARRIVED, BookingStatus.STARTED],
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const driver = await tx.driver.findUnique({
+        where: {
+          id: existingBooking.assignedDriverId!,
+        },
+        select: {
+          status: true,
+        },
+      });
+
+      if (driver && driver.status !== DriverStatus.INACTIVE) {
+        await tx.driver.update({
+          where: {
+            id: existingBooking.assignedDriverId!,
+          },
+          data: {
+            status: otherActiveBooking
+              ? DriverStatus.BUSY
+              : DriverStatus.AVAILABLE,
+          },
+        });
+      }
+
+      return updated;
     });
-
-    await this.createBookingHistory(
-      bookingId,
-      BookingStatus.COMPLETED,
-      'Trip completed',
-    );
 
     this.websocketGateway.notifyDispatchUpdate();
 
@@ -1723,39 +1965,61 @@ export class BookingsService {
 
   /* =====================================================
      REJECT BOOKING
+     ASSIGNED -> REJECTED
+
+     Rejection does not change the driver's live availability.
+     Assignment itself never makes a driver BUSY.
   ===================================================== */
 
   async rejectBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({
+    const existingBooking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
       },
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
+      },
     });
 
-    if (booking?.assignedDriverId) {
-      await this.driversService.updateDriverStatus(
-        booking.assignedDriverId,
-        DriverStatus.AVAILABLE,
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (existingBooking.status !== BookingStatus.ASSIGNED) {
+      throw new BadRequestException(
+        'Booking can only be rejected while it is Assigned',
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: {
-        id: bookingId,
-      },
+    if (!existingBooking.assignedDriverId) {
+      throw new BadRequestException(
+        'Booking does not have an assigned driver to reject it',
+      );
+    }
 
-      data: {
-        status: BookingStatus.REJECTED,
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: BookingStatus.REJECTED,
+          rejectedAt: new Date(),
+        },
+      });
 
-        rejectedAt: new Date(),
-      },
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.REJECTED,
+          notes: 'Driver rejected booking',
+        },
+      });
+
+      return updated;
     });
-
-    await this.createBookingHistory(
-      bookingId,
-      BookingStatus.REJECTED,
-      'Driver rejected booking',
-    );
 
     this.websocketGateway.notifyDispatchUpdate();
 
@@ -1764,39 +2028,106 @@ export class BookingsService {
 
   /* =====================================================
      CANCEL BOOKING
+
+     Allowed before a journey has actually started.
+     If cancellation happens after ARRIVED, the driver's BUSY
+     state is safely released unless another active trip exists.
   ===================================================== */
 
   async cancelBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({
+    const existingBooking = await this.prisma.booking.findUnique({
       where: {
         id: bookingId,
       },
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
+      },
     });
 
-    if (booking?.assignedDriverId) {
-      await this.driversService.updateDriverStatus(
-        booking.assignedDriverId,
-        DriverStatus.AVAILABLE,
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    const cancellableStatuses: BookingStatus[] = [
+      BookingStatus.PENDING,
+      BookingStatus.ASSIGNED,
+      BookingStatus.ACCEPTED,
+      BookingStatus.ARRIVED,
+    ];
+
+    if (
+      !cancellableStatuses.includes(existingBooking.status as BookingStatus)
+    ) {
+      throw new BadRequestException(
+        'Booking cannot be cancelled in its current status',
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: {
-        id: bookingId,
-      },
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: BookingStatus.CANCELLED,
+          cancelledAt: new Date(),
+        },
+      });
 
-      data: {
-        status: BookingStatus.CANCELLED,
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: BookingStatus.CANCELLED,
+          notes: 'Booking cancelled',
+        },
+      });
 
-        cancelledAt: new Date(),
-      },
+      if (
+        existingBooking.status === BookingStatus.ARRIVED &&
+        existingBooking.assignedDriverId
+      ) {
+        const otherActiveBooking = await tx.booking.findFirst({
+          where: {
+            id: {
+              not: bookingId,
+            },
+            assignedDriverId: existingBooking.assignedDriverId,
+            status: {
+              in: [BookingStatus.ARRIVED, BookingStatus.STARTED],
+            },
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        const driver = await tx.driver.findUnique({
+          where: {
+            id: existingBooking.assignedDriverId,
+          },
+          select: {
+            status: true,
+          },
+        });
+
+        if (driver && driver.status !== DriverStatus.INACTIVE) {
+          await tx.driver.update({
+            where: {
+              id: existingBooking.assignedDriverId,
+            },
+            data: {
+              status: otherActiveBooking
+                ? DriverStatus.BUSY
+                : DriverStatus.AVAILABLE,
+            },
+          });
+        }
+      }
+
+      return updated;
     });
-
-    await this.createBookingHistory(
-      bookingId,
-      BookingStatus.CANCELLED,
-      'Booking cancelled',
-    );
 
     this.websocketGateway.notifyDispatchUpdate();
 

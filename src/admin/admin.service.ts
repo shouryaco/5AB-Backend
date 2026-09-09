@@ -1,230 +1,264 @@
 import { Injectable } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
+
 import { BookingStatus } from '../common/enums/booking-status.enum';
 import { DriverStatus } from '../common/enums/driver-status.enum';
-import { WebsocketGateway } from '../websocket/websocket.gateway';
+
 import { BookingsService } from '../bookings/bookings.service';
+
+const dispatchDriverSelect = {
+  id: true,
+  name: true,
+  phone: true,
+  vehicleName: true,
+  vehicleNumber: true,
+  status: true,
+} as const;
+
+const dispatchBookingSelect = {
+  id: true,
+  bookingReference: true,
+
+  customerName: true,
+  customerPhone: true,
+  customerEmail: true,
+
+  pickupAddress: true,
+  dropoffAddress: true,
+  pickupDatetime: true,
+
+  passengers: true,
+  luggage: true,
+
+  journeyType: true,
+  notes: true,
+
+  status: true,
+  assignedDriverId: true,
+
+  estimatedDurationMinutes: true,
+
+  assignedDriver: {
+    select: dispatchDriverSelect,
+  },
+
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class AdminService {
   constructor(
-    private prisma: PrismaService,
-    private websocketGateway: WebsocketGateway,
-    private bookingsService: BookingsService,
+    private readonly prisma: PrismaService,
+    private readonly bookingsService: BookingsService,
   ) {}
 
+  /* =====================================================
+     DASHBOARD OVERVIEW
+
+     Uses two grouped queries instead of eight separate
+     count queries.
+  ===================================================== */
+
   async getOverview() {
-    const [
-      totalBookings,
-      activeTrips,
-      completedTrips,
-      cancelledTrips,
-      availableDrivers,
-      busyDrivers,
-      offlineDrivers,
-      inactiveDrivers,
-    ] = await Promise.all([
-      this.prisma.booking.count(),
-
-      this.prisma.booking.count({
-        where: {
-          status: {
-            in: [BookingStatus.STARTED, BookingStatus.ARRIVED],
-          },
+    const [bookingGroups, driverGroups] = await Promise.all([
+      this.prisma.booking.groupBy({
+        by: ['status'],
+        _count: {
+          _all: true,
         },
       }),
 
-      this.prisma.booking.count({
-        where: {
-          status: BookingStatus.COMPLETED,
-        },
-      }),
-
-      this.prisma.booking.count({
-        where: {
-          status: BookingStatus.CANCELLED,
-        },
-      }),
-
-      this.prisma.driver.count({
-        where: {
-          status: DriverStatus.AVAILABLE,
-        },
-      }),
-
-      this.prisma.driver.count({
-        where: {
-          status: DriverStatus.BUSY,
-        },
-      }),
-
-      this.prisma.driver.count({
-        where: {
-          status: DriverStatus.OFFLINE,
-        },
-      }),
-
-      this.prisma.driver.count({
-        where: {
-          status: DriverStatus.INACTIVE,
+      this.prisma.driver.groupBy({
+        by: ['status'],
+        _count: {
+          _all: true,
         },
       }),
     ]);
+
+    const bookingCounts: Record<string, number> = {};
+    const driverCounts: Record<string, number> = {};
+
+    for (const group of bookingGroups) {
+      bookingCounts[String(group.status)] = group._count._all;
+    }
+
+    for (const group of driverGroups) {
+      driverCounts[String(group.status)] = group._count._all;
+    }
+
+    const totalBookings = bookingGroups.reduce(
+      (total, group) => total + group._count._all,
+      0,
+    );
+
+    const activeTrips =
+      (bookingCounts[BookingStatus.ACCEPTED] ?? 0) +
+      (bookingCounts[BookingStatus.ARRIVED] ?? 0) +
+      (bookingCounts[BookingStatus.STARTED] ?? 0);
 
     return {
       totalBookings,
       activeTrips,
-      completedTrips,
-      cancelledTrips,
+      completedTrips: bookingCounts[BookingStatus.COMPLETED] ?? 0,
+      cancelledTrips: bookingCounts[BookingStatus.CANCELLED] ?? 0,
+
       drivers: {
-        availableDrivers,
-        busyDrivers,
-        offlineDrivers,
-        inactiveDrivers,
+        availableDrivers: driverCounts[DriverStatus.AVAILABLE] ?? 0,
+        busyDrivers: driverCounts[DriverStatus.BUSY] ?? 0,
+        offlineDrivers: driverCounts[DriverStatus.OFFLINE] ?? 0,
+        inactiveDrivers: driverCounts[DriverStatus.INACTIVE] ?? 0,
       },
     };
   }
 
+  /* =====================================================
+     DISPATCH BOARD
+
+     The old implementation performed separate queries for:
+       - unassigned bookings
+       - active bookings
+       - upcoming bookings
+       - available drivers
+       - busy drivers
+       - offline drivers
+       - inactive drivers
+
+     This version performs only TWO database queries:
+       1. all bookings needed by the dispatch board
+       2. all drivers needed by the dispatch board
+
+     The results are then partitioned in memory.
+  ===================================================== */
+
   async getDispatchBoard() {
-    const [
-      unassignedBookings,
-      activeBookings,
-      upcomingBookings,
-      availableDrivers,
-      busyDrivers,
-    ] = await Promise.all([
-      // 1. Unassigned (waiting for driver)
+    const now = new Date();
+
+    const [dispatchBookings, dispatchDrivers] = await Promise.all([
       this.prisma.booking.findMany({
         where: {
-          status: BookingStatus.PENDING,
-          assignedDriverId: null,
+          OR: [
+            {
+              status: BookingStatus.PENDING,
+              assignedDriverId: null,
+            },
+            {
+              status: BookingStatus.ASSIGNED,
+              pickupDatetime: {
+                gt: now,
+              },
+            },
+            {
+              status: {
+                in: [
+                  BookingStatus.ACCEPTED,
+                  BookingStatus.ARRIVED,
+                  BookingStatus.STARTED,
+                ],
+              },
+            },
+          ],
         },
+
+        select: dispatchBookingSelect,
+
         orderBy: {
-          createdAt: 'desc',
+          pickupDatetime: 'asc',
         },
       }),
 
-      // 2. Active trips
-      this.prisma.booking.findMany({
+      this.prisma.driver.findMany({
         where: {
           status: {
             in: [
-              BookingStatus.ACCEPTED,
-              BookingStatus.ARRIVED,
-              BookingStatus.STARTED,
+              DriverStatus.AVAILABLE,
+              DriverStatus.BUSY,
+              DriverStatus.OFFLINE,
+              DriverStatus.INACTIVE,
             ],
           },
         },
-        include: {
-          assignedDriver: true,
-        },
-        orderBy: {
-          pickupDatetime: 'asc',
-        },
-      }),
 
-      // 3. Upcoming bookings (future trips)
-      this.prisma.booking.findMany({
-        where: {
-          status: BookingStatus.ASSIGNED,
-          pickupDatetime: {
-            gt: new Date(),
-          },
-        },
-        include: {
-          assignedDriver: true,
-        },
-        orderBy: {
-          pickupDatetime: 'asc',
-        },
-      }),
+        select: dispatchDriverSelect,
 
-      // 4. Available drivers
-      this.prisma.driver.findMany({
-        where: {
-          status: DriverStatus.AVAILABLE,
-        },
         orderBy: {
-          updatedAt: 'desc',
-        },
-      }),
-
-      // 5. Busy drivers
-      this.prisma.driver.findMany({
-        where: {
-          status: DriverStatus.BUSY,
-        },
-        include: {
-          bookings: true,
+          name: 'asc',
         },
       }),
     ]);
+
+    const unassignedBookings = dispatchBookings.filter(
+      (booking) =>
+        booking.status === BookingStatus.PENDING &&
+        booking.assignedDriverId === null,
+    );
+
+    const activeBookings = dispatchBookings.filter((booking) =>
+      [
+        BookingStatus.ACCEPTED,
+        BookingStatus.ARRIVED,
+        BookingStatus.STARTED,
+      ].includes(booking.status as BookingStatus),
+    );
+
+    const upcomingBookings = dispatchBookings.filter(
+      (booking) =>
+        booking.status === BookingStatus.ASSIGNED &&
+        booking.pickupDatetime > now,
+    );
+
+    const availableDrivers = dispatchDrivers.filter(
+      (driver) => driver.status === DriverStatus.AVAILABLE,
+    );
+
+    const busyDrivers = dispatchDrivers.filter(
+      (driver) => driver.status === DriverStatus.BUSY,
+    );
+
+    const offlineDrivers = dispatchDrivers.filter(
+      (driver) => driver.status === DriverStatus.OFFLINE,
+    );
+
+    const inactiveDrivers = dispatchDrivers.filter(
+      (driver) => driver.status === DriverStatus.INACTIVE,
+    );
 
     return {
       summary: {
         unassignedCount: unassignedBookings.length,
         activeCount: activeBookings.length,
         upcomingCount: upcomingBookings.length,
+
         availableDrivers: availableDrivers.length,
         busyDrivers: busyDrivers.length,
+        offlineDrivers: offlineDrivers.length,
+        inactiveDrivers: inactiveDrivers.length,
       },
+
       unassignedBookings,
       activeBookings,
       upcomingBookings,
+
       availableDrivers,
       busyDrivers,
+      offlineDrivers,
+      inactiveDrivers,
     };
   }
 
+  /* =====================================================
+     DISPATCH ASSIGNMENT
+
+     Delegate to BookingsService so the admin compatibility
+     endpoint uses the same assignment rules as the main
+     booking assignment endpoint.
+  ===================================================== */
+
   async assignDriverToBooking(bookingId: string, driverId: string) {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-    });
-
-    if (!booking) {
-      throw new Error('Booking not found');
-    }
-
-    const driver = await this.prisma.driver.findUnique({
-      where: { id: driverId },
-    });
-
-    if (!driver) {
-      throw new Error('Driver not found');
-    }
-
-    const hasConflict = await this.bookingsService.hasDriverConflict(
+    return this.bookingsService.assignDriver(bookingId, {
       driverId,
-      booking.pickupDatetime,
-      booking.estimatedDurationMinutes,
-    );
-
-    if (hasConflict) {
-      throw new Error('Driver already has a conflicting booking');
-    }
-
-    const updatedBooking = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: {
-        assignedDriverId: driverId,
-        status: 'ASSIGNED',
-      },
-      include: {
-        assignedDriver: true,
-      },
     });
-
-    this.websocketGateway.sendBookingToDriver(driverId, updatedBooking);
-
-    // OPTIONAL: create history (if you already built it)
-    await this.prisma.bookingStatusHistory.create({
-      data: {
-        bookingId,
-        status: 'ASSIGNED',
-        notes: 'Manually assigned by admin',
-      },
-    });
-
-    return updatedBooking;
   }
 }
