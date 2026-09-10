@@ -53,6 +53,20 @@ enum UserRole {
   DRIVER
 }
 
+enum InvoiceGrouping {
+  ACCOUNT
+  BOOKER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
 // ======================================================
 // BOOKING
 // ======================================================
@@ -150,6 +164,11 @@ model Booking {
 
   finance BookingFinance?
 
+  // Current invoice line linked to this booking.
+  // When an invoice is voided, the service can release this link while
+  // retaining the historical invoice-item snapshot.
+  invoiceItem InvoiceItem?
+
   bookingStatusHistories BookingStatusHistory[]
 
   createdAt DateTime @default(now())
@@ -173,6 +192,11 @@ model ClientAccount {
 
   billingAddress String?
 
+  // Monthly invoicing preferences
+  invoiceEmail    String?
+  invoiceGrouping InvoiceGrouping @default(ACCOUNT)
+  invoiceDueDays  Int             @default(30)
+
   notes String?
 
   isActive Boolean @default(true)
@@ -180,6 +204,7 @@ model ClientAccount {
   bookers    Booker[]
   passengers Passenger[]
   bookings   Booking[]
+  invoices   Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -205,6 +230,7 @@ model Booker {
   notes String?
 
   bookings BookingBooker[]
+  invoices Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -362,6 +388,112 @@ model BookingFinance {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ======================================================
+// INVOICING
+// ======================================================
+
+model Invoice {
+  id            String @id @default(uuid())
+  invoiceNumber String @unique
+
+  // Billing owner
+  accountId String
+  account   ClientAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  // Present only when this invoice is grouped for one specific booker.
+  bookerId String?
+  booker   Booker? @relation(fields: [bookerId], references: [id], onDelete: SetNull)
+
+  grouping InvoiceGrouping @default(ACCOUNT)
+
+  // Billing period. Store explicit boundaries so historical invoices
+  // remain stable even if account settings change later.
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Snapshot of recipient details at generation time.
+  billingName    String
+  billingEmail   String?
+  billingAddress String?
+
+  currency String @default("GBP")
+
+  // Invoice totals are snapshots, not recalculated from live bookings.
+  netTotal        Float @default(0)
+  vatTotal        Float @default(0)
+  subtotal        Float @default(0)
+  adjustmentTotal Float @default(0)
+  totalAmount     Float @default(0)
+
+  amountPaid Float @default(0)
+
+  status InvoiceStatus @default(DRAFT)
+
+  issuedAt DateTime?
+  dueDate  DateTime?
+  paidAt   DateTime?
+
+  notes String?
+
+  items InvoiceItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([bookerId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@index([createdAt])
+}
+
+model InvoiceItem {
+  id String @id @default(uuid())
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  // Unique while the booking is actively attached to an invoice.
+  // Nullable allows a VOID invoice to keep its historical line snapshot
+  // while releasing the original booking for a corrected replacement invoice.
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  // Booking snapshot
+  bookingReference String
+  pickupDatetime   DateTime
+  pickupAddress    String
+  dropoffAddress   String
+
+  journeyType       String?
+  primaryBookerName String?
+  passengerName     String?
+  costCenter        String?
+  invoiceRef        String?
+
+  // Client-finance snapshot
+  quotedAmount     Float?
+  waitingCharge    Float  @default(0)
+  parkingCharge    Float  @default(0)
+  congestionCharge Float  @default(0)
+  discountAmount   Float  @default(0)
+  clientSubtotal   Float  @default(0)
+  adminFee         Float  @default(0)
+  netAmount        Float  @default(0)
+  vatAmount        Float  @default(0)
+  vatPercent       Float?
+  totalAmount      Float  @default(0)
+
+  paymentType String?
+  invoiceNote String?
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([pickupDatetime])
+  @@index([bookingReference])
 }
 
 // ======================================================
