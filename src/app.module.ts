@@ -8,6 +8,7 @@ import { WebsocketModule } from './websocket/websocket.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { ClientsModule } from './clients/clients.module';
+import { FinanceModule } from './finance/finance.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ClientsModule } from './clients/clients.module';
     AdminModule,
     AuthModule,
     ClientsModule,
+    FinanceModule,
   ],
 })
 export class AppModule {}
