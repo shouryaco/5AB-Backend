@@ -7,6 +7,10 @@ import { DriverStatus } from '../common/enums/driver-status.enum';
 
 import { BookingsService } from '../bookings/bookings.service';
 
+/* =====================================================
+   SHARED SELECTS
+===================================================== */
+
 const dispatchDriverSelect = {
   id: true,
   name: true,
@@ -43,9 +47,39 @@ const dispatchBookingSelect = {
     select: dispatchDriverSelect,
   },
 
+  completedAt: true,
+
   createdAt: true,
   updatedAt: true,
 } as const;
+
+/* =====================================================
+   LONDON DATE HELPER
+
+   Dispatch operates in London time.
+
+   This avoids problems between:
+   - GMT
+   - BST
+   - server UTC timezone
+===================================================== */
+
+const londonDateFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function getLondonDateKey(date: Date) {
+  const parts = londonDateFormatter.formatToParts(date);
+
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  return `${year}-${month}-${day}`;
+}
 
 @Injectable()
 export class AdminService {
@@ -57,7 +91,7 @@ export class AdminService {
   /* =====================================================
      DASHBOARD OVERVIEW
 
-     Uses two grouped queries instead of eight separate
+     Uses grouped queries instead of multiple individual
      count queries.
   ===================================================== */
 
@@ -65,6 +99,7 @@ export class AdminService {
     const [bookingGroups, driverGroups] = await Promise.all([
       this.prisma.booking.groupBy({
         by: ['status'],
+
         _count: {
           _all: true,
         },
@@ -72,6 +107,7 @@ export class AdminService {
 
       this.prisma.driver.groupBy({
         by: ['status'],
+
         _count: {
           _all: true,
         },
@@ -101,14 +137,20 @@ export class AdminService {
 
     return {
       totalBookings,
+
       activeTrips,
+
       completedTrips: bookingCounts[BookingStatus.COMPLETED] ?? 0,
+
       cancelledTrips: bookingCounts[BookingStatus.CANCELLED] ?? 0,
 
       drivers: {
         availableDrivers: driverCounts[DriverStatus.AVAILABLE] ?? 0,
+
         busyDrivers: driverCounts[DriverStatus.BUSY] ?? 0,
+
         offlineDrivers: driverCounts[DriverStatus.OFFLINE] ?? 0,
+
         inactiveDrivers: driverCounts[DriverStatus.INACTIVE] ?? 0,
       },
     };
@@ -117,39 +159,89 @@ export class AdminService {
   /* =====================================================
      DISPATCH BOARD
 
-     The old implementation performed separate queries for:
-       - unassigned bookings
-       - active bookings
-       - upcoming bookings
-       - available drivers
-       - busy drivers
-       - offline drivers
-       - inactive drivers
+     Operational booking lanes:
 
-     This version performs only TWO database queries:
-       1. all bookings needed by the dispatch board
-       2. all drivers needed by the dispatch board
+     GREY
+     PENDING / ASSIGNED
+     = Not Accepted
 
-     The results are then partitioned in memory.
+     RED
+     ACCEPTED
+     = On Road
+
+     PURPLE
+     ARRIVED
+     = Arrived / Waiting
+
+     YELLOW
+     STARTED
+     = Passenger On Board
+
+     GREEN
+     COMPLETED
+     = Completed Today
+
+     We keep the old:
+       - unassignedBookings
+       - activeBookings
+       - upcomingBookings
+
+     because other parts of the admin/dashboard may still
+     depend on those fields.
+
+     Database queries remain efficient:
+       1. Dispatch-related bookings
+       2. Drivers
   ===================================================== */
 
   async getDispatchBoard() {
     const now = new Date();
 
+    /*
+     * We only need a small recent completed-booking window
+     * from PostgreSQL.
+     *
+     * The final "today" check is performed using London
+     * timezone below, which correctly handles GMT/BST.
+     */
+    const recentCompletedCutoff = new Date(now.getTime() - 36 * 60 * 60 * 1000);
+
+    const londonToday = getLondonDateKey(now);
+
     const [dispatchBookings, dispatchDrivers] = await Promise.all([
+      /* =================================================
+         BOOKINGS
+      ================================================= */
+
       this.prisma.booking.findMany({
         where: {
           OR: [
+            /*
+             * PENDING
+             *
+             * Normally an unassigned booking.
+             */
             {
               status: BookingStatus.PENDING,
-              assignedDriverId: null,
             },
+
+            /*
+             * ASSIGNED
+             *
+             * Important:
+             * Do NOT restrict this to future pickup only.
+             *
+             * If the pickup time has passed but the driver
+             * has still not accepted, the booking must remain
+             * visible in the Not Accepted lane.
+             */
             {
               status: BookingStatus.ASSIGNED,
-              pickupDatetime: {
-                gt: now,
-              },
             },
+
+            /*
+             * ACTIVE OPERATIONAL STATUSES
+             */
             {
               status: {
                 in: [
@@ -157,6 +249,20 @@ export class AdminService {
                   BookingStatus.ARRIVED,
                   BookingStatus.STARTED,
                 ],
+              },
+            },
+
+            /*
+             * COMPLETED
+             *
+             * Pull only recent completions from PostgreSQL.
+             * Exact London "today" filtering happens below.
+             */
+            {
+              status: BookingStatus.COMPLETED,
+
+              completedAt: {
+                gte: recentCompletedCutoff,
               },
             },
           ],
@@ -168,6 +274,10 @@ export class AdminService {
           pickupDatetime: 'asc',
         },
       }),
+
+      /* =================================================
+         DRIVERS
+      ================================================= */
 
       this.prisma.driver.findMany({
         where: {
@@ -189,6 +299,13 @@ export class AdminService {
       }),
     ]);
 
+    /* =====================================================
+       OLD DISPATCH GROUPS
+
+       Keep these for compatibility with existing dashboard
+       and frontend code.
+    ===================================================== */
+
     const unassignedBookings = dispatchBookings.filter(
       (booking) =>
         booking.status === BookingStatus.PENDING &&
@@ -209,6 +326,82 @@ export class AdminService {
         booking.pickupDatetime > now,
     );
 
+    /* =====================================================
+       NEW DISPATCH STATUS LANES
+    ===================================================== */
+
+    /*
+     * GREY
+     *
+     * Booking has not yet been accepted by the driver.
+     *
+     * Includes:
+     * PENDING
+     * ASSIGNED
+     */
+    const notAcceptedBookings = dispatchBookings.filter(
+      (booking) =>
+        booking.status === BookingStatus.PENDING ||
+        booking.status === BookingStatus.ASSIGNED,
+    );
+
+    /*
+     * RED
+     *
+     * Driver accepted the booking and is travelling
+     * towards the pickup location.
+     */
+    const onRoadBookings = dispatchBookings.filter(
+      (booking) => booking.status === BookingStatus.ACCEPTED,
+    );
+
+    /*
+     * PURPLE
+     *
+     * Driver has arrived at pickup and is waiting.
+     */
+    const arrivedBookings = dispatchBookings.filter(
+      (booking) => booking.status === BookingStatus.ARRIVED,
+    );
+
+    /*
+     * YELLOW
+     *
+     * Passenger is inside the vehicle and journey
+     * is currently underway.
+     */
+    const passengerOnBoardBookings = dispatchBookings.filter(
+      (booking) => booking.status === BookingStatus.STARTED,
+    );
+
+    /*
+     * GREEN
+     *
+     * Only bookings completed today in London.
+     *
+     * Older completed bookings remain available from the
+     * normal Bookings screen instead of permanently filling
+     * the live Dispatch board.
+     */
+    const completedBookings = dispatchBookings
+      .filter(
+        (booking) =>
+          booking.status === BookingStatus.COMPLETED &&
+          booking.completedAt !== null &&
+          getLondonDateKey(booking.completedAt) === londonToday,
+      )
+      .sort((a, b) => {
+        const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+
+        const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+
+        return bTime - aTime;
+      });
+
+    /* =====================================================
+       DRIVER GROUPS
+    ===================================================== */
+
     const availableDrivers = dispatchDrivers.filter(
       (driver) => driver.status === DriverStatus.AVAILABLE,
     );
@@ -225,25 +418,80 @@ export class AdminService {
       (driver) => driver.status === DriverStatus.INACTIVE,
     );
 
+    /* =====================================================
+       RESPONSE
+    ===================================================== */
+
     return {
       summary: {
+        /*
+         * Existing summary values.
+         * Keep for backward compatibility.
+         */
         unassignedCount: unassignedBookings.length,
+
         activeCount: activeBookings.length,
+
         upcomingCount: upcomingBookings.length,
 
+        /*
+         * New operational lane counts.
+         */
+        notAcceptedCount: notAcceptedBookings.length,
+
+        onRoadCount: onRoadBookings.length,
+
+        arrivedCount: arrivedBookings.length,
+
+        passengerOnBoardCount: passengerOnBoardBookings.length,
+
+        completedCount: completedBookings.length,
+
+        /*
+         * Drivers
+         */
         availableDrivers: availableDrivers.length,
+
         busyDrivers: busyDrivers.length,
+
         offlineDrivers: offlineDrivers.length,
+
         inactiveDrivers: inactiveDrivers.length,
       },
 
+      /*
+       * Existing booking groups.
+       *
+       * DO NOT REMOVE.
+       */
       unassignedBookings,
+
       activeBookings,
+
       upcomingBookings,
 
+      /*
+       * New booking status lanes.
+       */
+      notAcceptedBookings,
+
+      onRoadBookings,
+
+      arrivedBookings,
+
+      passengerOnBoardBookings,
+
+      completedBookings,
+
+      /*
+       * Drivers
+       */
       availableDrivers,
+
       busyDrivers,
+
       offlineDrivers,
+
       inactiveDrivers,
     };
   }
