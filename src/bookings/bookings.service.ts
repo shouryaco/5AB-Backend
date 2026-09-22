@@ -5,11 +5,13 @@ import {
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
 import { QueryBookingDto } from './dto/query-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { QueryClearedBookingsDto } from './dto/query-cleared-bookings.dto';
 
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 
@@ -34,6 +36,91 @@ export class BookingsService {
     private prisma: PrismaService,
     private websocketGateway: WebsocketGateway,
   ) {}
+
+  /* =====================================================
+   LONDON DATE HELPERS
+===================================================== */
+
+  private getLondonUtcDate(
+    year: number,
+    month: number,
+    day: number,
+    hour = 0,
+    minute = 0,
+    second = 0,
+  ) {
+    const initialGuess = new Date(
+      Date.UTC(year, month - 1, day, hour, minute, second),
+    );
+
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+
+    const getOffset = (date: Date) => {
+      const parts = formatter.formatToParts(date);
+
+      const values: Record<string, string> = {};
+
+      for (const part of parts) {
+        if (part.type !== 'literal') {
+          values[part.type] = part.value;
+        }
+      }
+
+      const londonAsUtc = Date.UTC(
+        Number(values.year),
+        Number(values.month) - 1,
+        Number(values.day),
+        Number(values.hour),
+        Number(values.minute),
+        Number(values.second),
+      );
+
+      return londonAsUtc - date.getTime();
+    };
+
+    const firstOffset = getOffset(initialGuess);
+
+    let result = new Date(initialGuess.getTime() - firstOffset);
+
+    const correctedOffset = getOffset(result);
+
+    if (correctedOffset !== firstOffset) {
+      result = new Date(initialGuess.getTime() - correctedOffset);
+    }
+
+    return result;
+  }
+
+  private parseLondonDate(value: string) {
+    const [year, month, day] = value.split('-').map(Number);
+
+    return {
+      year,
+      month,
+      day,
+    };
+  }
+
+  private getNextLondonDate(value: string) {
+    const { year, month, day } = this.parseLondonDate(value);
+
+    const nextDate = new Date(Date.UTC(year, month - 1, day + 1));
+
+    return {
+      year: nextDate.getUTCFullYear(),
+      month: nextDate.getUTCMonth() + 1,
+      day: nextDate.getUTCDate(),
+    };
+  }
 
   /* =====================================================
      BOOKING HISTORY
@@ -736,7 +823,452 @@ export class BookingsService {
       },
     };
   }
+  /* =====================================================
+   CLEARED BOOKINGS
 
+   Completed bookings only.
+
+   Supports:
+   - search
+   - date range
+   - month
+   - account
+   - driver
+   - payment type
+   - price review
+   - pagination
+===================================================== */
+
+  async findClearedBookings(query: QueryClearedBookingsDto) {
+    const {
+      search,
+      fromDate,
+      toDate,
+      month,
+      accountId,
+      driverId,
+      paymentType,
+      priceReview,
+      page = 1,
+      limit = 25,
+    } = query;
+
+    const currentPage =
+      Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+
+    const perPage =
+      Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), 100)
+        : 25;
+
+    const where: Prisma.BookingWhereInput = {
+      status: BookingStatus.COMPLETED,
+    };
+
+    const andConditions: Prisma.BookingWhereInput[] = [];
+
+    /* =====================================================
+     ACCOUNT
+  ===================================================== */
+
+    if (accountId) {
+      where.accountId = accountId;
+    }
+
+    /* =====================================================
+     DRIVER
+  ===================================================== */
+
+    if (driverId) {
+      where.assignedDriverId = driverId;
+    }
+
+    /* =====================================================
+     SEARCH
+
+     Searches:
+     - booking/job number
+     - invoice/job ref
+     - customer
+     - phone
+     - pickup
+     - destination
+     - account
+     - driver
+     - passenger
+  ===================================================== */
+
+    const cleanSearch = search?.trim();
+
+    if (cleanSearch) {
+      andConditions.push({
+        OR: [
+          {
+            bookingReference: {
+              contains: cleanSearch,
+              mode: 'insensitive',
+            },
+          },
+
+          {
+            invoiceRef: {
+              contains: cleanSearch,
+              mode: 'insensitive',
+            },
+          },
+
+          {
+            customerName: {
+              contains: cleanSearch,
+              mode: 'insensitive',
+            },
+          },
+
+          {
+            customerPhone: {
+              contains: cleanSearch,
+            },
+          },
+
+          {
+            pickupAddress: {
+              contains: cleanSearch,
+              mode: 'insensitive',
+            },
+          },
+
+          {
+            dropoffAddress: {
+              contains: cleanSearch,
+              mode: 'insensitive',
+            },
+          },
+
+          {
+            account: {
+              is: {
+                name: {
+                  contains: cleanSearch,
+                  mode: 'insensitive',
+                },
+              },
+            },
+          },
+
+          {
+            assignedDriver: {
+              is: {
+                name: {
+                  contains: cleanSearch,
+                  mode: 'insensitive',
+                },
+              },
+            },
+          },
+
+          {
+            passengersList: {
+              some: {
+                passenger: {
+                  name: {
+                    contains: cleanSearch,
+                    mode: 'insensitive',
+                  },
+                },
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    /* =====================================================
+     DATE RANGE
+
+     Filters by JOB/PICKUP DATE, matching the reference.
+  ===================================================== */
+
+    let lowerDate: Date | undefined;
+    let upperDate: Date | undefined;
+
+    /*
+     * Month filter
+     * Example: 2026-09
+     */
+    if (month) {
+      const [year, monthNumber] = month.split('-').map(Number);
+
+      lowerDate = this.getLondonUtcDate(year, monthNumber, 1);
+
+      const nextMonth = new Date(Date.UTC(year, monthNumber, 1));
+
+      upperDate = this.getLondonUtcDate(
+        nextMonth.getUTCFullYear(),
+        nextMonth.getUTCMonth() + 1,
+        1,
+      );
+    }
+
+    /*
+     * From date
+     *
+     * If month is also selected, this further narrows
+     * the month rather than breaking it.
+     */
+    if (fromDate) {
+      const { year, month: fromMonth, day } = this.parseLondonDate(fromDate);
+
+      const fromStart = this.getLondonUtcDate(year, fromMonth, day);
+
+      if (!lowerDate || fromStart > lowerDate) {
+        lowerDate = fromStart;
+      }
+    }
+
+    /*
+     * To date is inclusive in the UI.
+     *
+     * Database condition therefore uses:
+     * pickupDatetime < start of next London day
+     */
+    if (toDate) {
+      const next = this.getNextLondonDate(toDate);
+
+      const toEnd = this.getLondonUtcDate(next.year, next.month, next.day);
+
+      if (!upperDate || toEnd < upperDate) {
+        upperDate = toEnd;
+      }
+    }
+
+    if (lowerDate && upperDate && lowerDate >= upperDate) {
+      throw new BadRequestException('Invalid cleared booking date range');
+    }
+
+    if (lowerDate || upperDate) {
+      where.pickupDatetime = {
+        ...(lowerDate
+          ? {
+              gte: lowerDate,
+            }
+          : {}),
+
+        ...(upperDate
+          ? {
+              lt: upperDate,
+            }
+          : {}),
+      };
+    }
+
+    /* =====================================================
+     PAYMENT TYPE
+  ===================================================== */
+
+    const cleanPaymentType = paymentType?.trim();
+
+    if (cleanPaymentType) {
+      andConditions.push({
+        finance: {
+          is: {
+            paymentType: {
+              equals: cleanPaymentType,
+              mode: 'insensitive',
+            },
+          },
+        },
+      });
+    }
+
+    /* =====================================================
+     PRICE REVIEW
+
+     TEMPORARY MAPPING:
+
+     YES = clientPriceOverride true
+     NO  = false or no finance record
+
+     Later we can replace this with a dedicated
+     priceReviewed field if required by the client.
+  ===================================================== */
+
+    if (priceReview === 'YES') {
+      andConditions.push({
+        finance: {
+          is: {
+            clientPriceOverride: true,
+          },
+        },
+      });
+    }
+
+    if (priceReview === 'NO') {
+      andConditions.push({
+        OR: [
+          {
+            finance: {
+              is: null,
+            },
+          },
+
+          {
+            finance: {
+              is: {
+                clientPriceOverride: false,
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
+    /* =====================================================
+     QUERY
+  ===================================================== */
+
+    const [bookings, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where,
+
+        select: {
+          id: true,
+          bookingReference: true,
+
+          accountId: true,
+
+          account: {
+            select: {
+              id: true,
+              name: true,
+              accountCode: true,
+            },
+          },
+
+          invoiceRef: true,
+          costCenter: true,
+
+          customerName: true,
+          customerPhone: true,
+
+          pickupDatetime: true,
+
+          pickupAddress: true,
+          dropoffAddress: true,
+
+          journeyType: true,
+
+          preferredVehicleCategory: true,
+
+          routeDistanceMeters: true,
+          routeDurationSeconds: true,
+
+          completedAt: true,
+
+          assignedDriverId: true,
+
+          assignedDriver: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              vehicleName: true,
+              vehicleNumber: true,
+              status: true,
+            },
+          },
+
+          passengersList: {
+            orderBy: {
+              position: 'asc',
+            },
+
+            select: {
+              id: true,
+              isPrimary: true,
+              position: true,
+
+              passenger: {
+                select: {
+                  id: true,
+                  name: true,
+                  phone: true,
+                  email: true,
+                },
+              },
+            },
+          },
+
+          finance: {
+            select: {
+              clientQuote: true,
+              clientWaitingCharge: true,
+              clientParking: true,
+              clientCongestion: true,
+              clientDiscount: true,
+              clientTotal: true,
+              clientAdminFee: true,
+              clientNet: true,
+              clientVat: true,
+              clientVatPercent: true,
+              clientTotalAmount: true,
+
+              clientPriceOverride: true,
+
+              paymentType: true,
+              financeNote: true,
+              invoiceNote: true,
+            },
+          },
+        },
+
+        orderBy: [
+          {
+            pickupDatetime: 'desc',
+          },
+          {
+            createdAt: 'desc',
+          },
+        ],
+
+        skip: (currentPage - 1) * perPage,
+
+        take: perPage,
+      }),
+
+      this.prisma.booking.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data: bookings,
+
+      pagination: {
+        total,
+
+        page: currentPage,
+
+        limit: perPage,
+
+        totalPages: Math.max(1, Math.ceil(total / perPage)),
+      },
+
+      filters: {
+        search: cleanSearch || null,
+        fromDate: fromDate || null,
+        toDate: toDate || null,
+        month: month || null,
+        accountId: accountId || null,
+        driverId: driverId || null,
+        paymentType: cleanPaymentType || null,
+        priceReview: priceReview || null,
+      },
+    };
+  }
   /* =====================================================
      FIND ONE BOOKING
   ===================================================== */
