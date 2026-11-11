@@ -24,7 +24,7 @@ import { QueryClearedBookingsDto } from './dto/query-cleared-bookings.dto';
 
 @Controller('bookings')
 export class BookingsController {
-  constructor(private readonly bookingsService: BookingsService) {}
+  constructor(private readonly bookingsService: BookingsService) { }
 
   @Post()
   create(@Body() createBookingDto: CreateBookingDto) {
@@ -104,6 +104,11 @@ export class BookingsController {
   @Roles('ADMIN', 'DISPATCHER')
   completeBooking(@Param('id') id: string) {
     return this.bookingsService.completeBooking(id);
+  }
+
+  @Patch(':id/reset-status')
+  resetBookingStatus(@Param('id') id: string) {
+    return this.bookingsService.resetBookingStatus(id);
   }
 
   @Patch(':id/reject')

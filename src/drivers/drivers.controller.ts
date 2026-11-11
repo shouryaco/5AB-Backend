@@ -9,7 +9,11 @@ import {
   Query,
   Req,
   UseGuards,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+
+import { FileInterceptor } from '@nestjs/platform-express';
 
 import { DriversService } from './drivers.service';
 
@@ -329,4 +333,30 @@ export class DriversController {
   update(@Param('id') id: string, @Body() updateDriverDto: UpdateDriverDto) {
     return this.driversService.update(id, updateDriverDto);
   }
+
+  @Post(':id/photo')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN')
+@UseInterceptors(
+  FileInterceptor('file', {
+    limits: {
+      fileSize: 5 * 1024 * 1024,
+    },
+  }),
+)
+uploadProfilePhoto(
+  @Param('id') id: string,
+  @UploadedFile()
+  file: {
+    buffer: Buffer;
+    mimetype: string;
+    originalname: string;
+    size: number;
+  },
+) {
+  return this.driversService.uploadProfilePhoto(
+    id,
+    file,
+  );
+}
 }
