@@ -242,7 +242,7 @@ export class DriverStatementsService {
 
     const vatPercent = driver.vatRegistered
       ? this.roundMoney(driver.vatPercent ?? 20)
-      : 0; 
+      : 0;
 
     const rows = bookings.map((booking) => {
       const finance = this.getDriverFinance(booking.finance!);
@@ -451,6 +451,24 @@ export class DriverStatementsService {
         items: {
           orderBy: {
             pickupDatetime: 'asc',
+          },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                status: true,
+                pickupDatetime: true,
+                arrivedAt: true,
+                startedAt: true,
+                completedAt: true,
+                cancelledAt: true,
+                finance: {
+                  select: {
+                    paymentType: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
