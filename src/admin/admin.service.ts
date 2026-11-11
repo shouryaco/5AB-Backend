@@ -30,13 +30,14 @@ const dispatchBookingSelect = {
 
   pickupAddress: true,
   dropoffAddress: true,
-  pickupDatetime: true,
+  pickupDatetime: true, 
 
   passengers: true,
   luggage: true,
 
   journeyType: true,
   notes: true,
+  driverNote: true,
 
   status: true,
   assignedDriverId: true,
@@ -86,7 +87,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
-  ) {}
+  ) { }
 
   /* =====================================================
      DASHBOARD OVERVIEW

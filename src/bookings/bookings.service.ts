@@ -35,7 +35,7 @@ export class BookingsService {
   constructor(
     private prisma: PrismaService,
     private websocketGateway: WebsocketGateway,
-  ) {}
+  ) { }
 
   /* =====================================================
    LONDON DATE HELPERS
@@ -346,10 +346,10 @@ export class BookingsService {
 
         account: accountId
           ? {
-              connect: {
-                id: accountId,
-              },
-            }
+            connect: {
+              id: accountId,
+            },
+          }
           : undefined,
 
         costCenter: bookingData.costCenter?.trim() || undefined,
@@ -424,10 +424,10 @@ export class BookingsService {
 
         assignedDriver: assignedDriverId
           ? {
-              connect: {
-                id: assignedDriverId,
-              },
-            }
+            connect: {
+              id: assignedDriverId,
+            },
+          }
           : undefined,
 
         status: assignedDriverId
@@ -441,18 +441,18 @@ export class BookingsService {
         bookers:
           bookers && bookers.length > 0
             ? {
-                create: bookers.map((item, index) => ({
-                  booker: {
-                    connect: {
-                      id: item.bookerId,
-                    },
+              create: bookers.map((item, index) => ({
+                booker: {
+                  connect: {
+                    id: item.bookerId,
                   },
+                },
 
-                  isPrimary: item.isPrimary ?? index === 0,
+                isPrimary: item.isPrimary ?? index === 0,
 
-                  position: item.position ?? index,
-                })),
-              }
+                position: item.position ?? index,
+              })),
+            }
             : undefined,
 
         /* =================================================
@@ -462,18 +462,18 @@ export class BookingsService {
         passengersList:
           passengersList && passengersList.length > 0
             ? {
-                create: passengersList.map((item, index) => ({
-                  passenger: {
-                    connect: {
-                      id: item.passengerId,
-                    },
+              create: passengersList.map((item, index) => ({
+                passenger: {
+                  connect: {
+                    id: item.passengerId,
                   },
+                },
 
-                  isPrimary: item.isPrimary ?? index === 0,
+                isPrimary: item.isPrimary ?? index === 0,
 
-                  position: item.position ?? index,
-                })),
-              }
+                position: item.position ?? index,
+              })),
+            }
             : undefined,
 
         /* =================================================
@@ -483,16 +483,16 @@ export class BookingsService {
         vias:
           vias && vias.length > 0
             ? {
-                create: vias.map((via, index) => ({
-                  address: via.address.trim(),
+              create: vias.map((via, index) => ({
+                address: via.address.trim(),
 
-                  position: via.position ?? index,
+                position: via.position ?? index,
 
-                  latitude: via.latitude,
+                latitude: via.latitude,
 
-                  longitude: via.longitude,
-                })),
-              }
+                longitude: via.longitude,
+              })),
+            }
             : undefined,
 
         /* =================================================
@@ -501,70 +501,70 @@ export class BookingsService {
 
         finance: finance
           ? {
-              create: {
-                /* ---------------- CLIENT ---------------- */
+            create: {
+              /* ---------------- CLIENT ---------------- */
 
-                clientQuote: finance.clientQuote,
+              clientQuote: finance.clientQuote,
 
-                clientWaitingCharge: finance.clientWaitingCharge,
+              clientWaitingCharge: finance.clientWaitingCharge,
 
-                clientParking: finance.clientParking,
+              clientParking: finance.clientParking,
 
-                clientCongestion: finance.clientCongestion,
+              clientCongestion: finance.clientCongestion,
 
-                clientDiscount: finance.clientDiscount,
+              clientDiscount: finance.clientDiscount,
 
-                clientTotal: finance.clientTotal,
+              clientTotal: finance.clientTotal,
 
-                clientAdminFee: finance.clientAdminFee,
+              clientAdminFee: finance.clientAdminFee,
 
-                clientNet: finance.clientNet,
+              clientNet: finance.clientNet,
 
-                clientVat: finance.clientVat,
+              clientVat: finance.clientVat,
 
-                clientVatPercent: finance.clientVatPercent,
+              clientVatPercent: finance.clientVatPercent,
 
-                clientTotalAmount: finance.clientTotalAmount,
+              clientTotalAmount: finance.clientTotalAmount,
 
-                clientWaitingIncluded: finance.clientWaitingIncluded ?? false,
+              clientWaitingIncluded: finance.clientWaitingIncluded ?? false,
 
-                clientParkingIncluded: finance.clientParkingIncluded ?? false,
+              clientParkingIncluded: finance.clientParkingIncluded ?? false,
 
-                clientPriceOverride: finance.clientPriceOverride ?? false,
+              clientPriceOverride: finance.clientPriceOverride ?? false,
 
-                /* ---------------- DRIVER ---------------- */
+              /* ---------------- DRIVER ---------------- */
 
-                driverCost: finance.driverCost,
+              driverCost: finance.driverCost,
 
-                driverWaitingPay: finance.driverWaitingPay,
+              driverWaitingPay: finance.driverWaitingPay,
 
-                driverParking: finance.driverParking,
+              driverParking: finance.driverParking,
 
-                driverCongestion: finance.driverCongestion,
+              driverCongestion: finance.driverCongestion,
 
-                driverTotal: finance.driverTotal,
+              driverTotal: finance.driverTotal,
 
-                driverWaitingIncluded: finance.driverWaitingIncluded ?? false,
+              driverWaitingIncluded: finance.driverWaitingIncluded ?? false,
 
-                driverParkingIncluded: finance.driverParkingIncluded ?? false,
+              driverParkingIncluded: finance.driverParkingIncluded ?? false,
 
-                driverPayAsStandard: finance.driverPayAsStandard ?? false,
+              driverPayAsStandard: finance.driverPayAsStandard ?? false,
 
-                driverPriceOverride: finance.driverPriceOverride ?? false,
+              driverPriceOverride: finance.driverPriceOverride ?? false,
 
-                /* ---------------- PAYMENT ---------------- */
+              /* ---------------- PAYMENT ---------------- */
 
-                paymentType: finance.paymentType?.trim() || undefined,
+              paymentType: finance.paymentType?.trim() || undefined,
 
-                /* ---------------- NOTES ---------------- */
+              /* ---------------- NOTES ---------------- */
 
-                financeNote: finance.financeNote?.trim() || undefined,
+              financeNote: finance.financeNote?.trim() || undefined,
 
-                invoiceNote: finance.invoiceNote?.trim() || undefined,
+              invoiceNote: finance.invoiceNote?.trim() || undefined,
 
-                extraNote: finance.extraNote?.trim() || undefined,
-              },
-            }
+              extraNote: finance.extraNote?.trim() || undefined,
+            },
+          }
           : undefined,
 
         /* =================================================
@@ -574,24 +574,24 @@ export class BookingsService {
         bookingStatusHistories: {
           create: assignedDriverId
             ? [
-                {
-                  status: BookingStatus.PENDING,
+              {
+                status: BookingStatus.PENDING,
 
-                  notes: 'Booking created',
-                },
-                {
-                  status: BookingStatus.ASSIGNED,
+                notes: 'Booking created',
+              },
+              {
+                status: BookingStatus.ASSIGNED,
 
-                  notes: 'Driver assigned during booking creation',
-                },
-              ]
+                notes: 'Driver assigned during booking creation',
+              },
+            ]
             : [
-                {
-                  status: BookingStatus.PENDING,
+              {
+                status: BookingStatus.PENDING,
 
-                  notes: 'Booking created',
-                },
-              ],
+                notes: 'Booking created',
+              },
+            ],
         },
       },
 
@@ -1049,14 +1049,14 @@ export class BookingsService {
       where.pickupDatetime = {
         ...(lowerDate
           ? {
-              gte: lowerDate,
-            }
+            gte: lowerDate,
+          }
           : {}),
 
         ...(upperDate
           ? {
-              lt: upperDate,
-            }
+            lt: upperDate,
+          }
           : {}),
       };
     }
@@ -1445,10 +1445,10 @@ export class BookingsService {
       bookers !== undefined
         ? bookers
         : existingBooking.bookers.map((item) => ({
-            bookerId: item.bookerId,
-            isPrimary: item.isPrimary,
-            position: item.position,
-          }));
+          bookerId: item.bookerId,
+          isPrimary: item.isPrimary,
+          position: item.position,
+        }));
 
     if (effectiveBookers.length > 0) {
       const bookerIds = effectiveBookers.map((item) => item.bookerId);
@@ -1498,10 +1498,10 @@ export class BookingsService {
       passengersList !== undefined
         ? passengersList
         : existingBooking.passengersList.map((item) => ({
-            passengerId: item.passengerId,
-            isPrimary: item.isPrimary,
-            position: item.position,
-          }));
+          passengerId: item.passengerId,
+          isPrimary: item.isPrimary,
+          position: item.position,
+        }));
 
     if (effectivePassengers.length > 0) {
       const passengerIds = effectivePassengers.map((item) => item.passengerId);
@@ -1611,13 +1611,13 @@ export class BookingsService {
     if (accountId !== undefined) {
       data.account = accountId
         ? {
-            connect: {
-              id: accountId,
-            },
-          }
+          connect: {
+            id: accountId,
+          },
+        }
         : {
-            disconnect: true,
-          };
+          disconnect: true,
+        };
     }
 
     if (bookingData.costCenter !== undefined) {
@@ -1729,13 +1729,13 @@ export class BookingsService {
     if (assignmentChanged) {
       data.assignedDriver = assignedDriverId
         ? {
-            connect: {
-              id: assignedDriverId,
-            },
-          }
+          connect: {
+            id: assignedDriverId,
+          },
+        }
         : {
-            disconnect: true,
-          };
+          disconnect: true,
+        };
 
       data.status = assignedDriverId
         ? BookingStatus.ASSIGNED
@@ -2015,10 +2015,10 @@ export class BookingsService {
 
         ...(excludeBookingId
           ? {
-              id: {
-                not: excludeBookingId,
-              },
-            }
+            id: {
+              not: excludeBookingId,
+            },
+          }
           : {}),
 
         status: {
@@ -2645,6 +2645,122 @@ export class BookingsService {
         });
 
         if (driver && driver.status !== DriverStatus.INACTIVE) {
+          await tx.driver.update({
+            where: {
+              id: existingBooking.assignedDriverId,
+            },
+            data: {
+              status: otherActiveBooking
+                ? DriverStatus.BUSY
+                : DriverStatus.AVAILABLE,
+            },
+          });
+        }
+      }
+
+      return updated;
+    });
+
+    this.websocketGateway.notifyDispatchUpdate();
+
+    return updatedBooking;
+  }
+
+  async resetBookingStatus(bookingId: string) {
+    const existingBooking = await this.prisma.booking.findUnique({
+      where: {
+        id: bookingId,
+      },
+      select: {
+        id: true,
+        status: true,
+        assignedDriverId: true,
+      },
+    });
+
+    if (!existingBooking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    const targetStatus = existingBooking.assignedDriverId
+      ? BookingStatus.ASSIGNED
+      : BookingStatus.PENDING;
+
+    if (existingBooking.status === targetStatus) {
+      throw new BadRequestException(
+        `Booking is already ${targetStatus}`,
+      );
+    }
+
+    const shouldReleaseDriver = [
+      BookingStatus.ARRIVED,
+      BookingStatus.STARTED,
+    ].includes(existingBooking.status as BookingStatus);
+
+    const updatedBooking = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booking.update({
+        where: {
+          id: bookingId,
+        },
+        data: {
+          status: targetStatus,
+
+          acceptedAt: null,
+          arrivedAt: null,
+          startedAt: null,
+          completedAt: null,
+          rejectedAt: null,
+          cancelledAt: null,
+        },
+      });
+
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId,
+          status: targetStatus,
+          notes: `Booking status reset from ${existingBooking.status} to ${targetStatus}`,
+        },
+      });
+
+      if (
+        shouldReleaseDriver &&
+        existingBooking.assignedDriverId
+      ) {
+        const otherActiveBooking = await tx.booking.findFirst({
+          where: {
+            id: {
+              not: bookingId,
+            },
+
+            assignedDriverId:
+              existingBooking.assignedDriverId,
+
+            status: {
+              in: [
+                BookingStatus.ARRIVED,
+                BookingStatus.STARTED,
+              ],
+            },
+          },
+
+          select: {
+            id: true,
+          },
+        });
+
+        const driver = await tx.driver.findUnique({
+          where: {
+            id: existingBooking.assignedDriverId,
+          },
+          select: {
+            status: true,
+          },
+        });
+
+        if (
+          driver &&
+          driver.status !== DriverStatus.INACTIVE
+        ) {
           await tx.driver.update({
             where: {
               id: existingBooking.assignedDriverId,

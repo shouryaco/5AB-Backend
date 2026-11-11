@@ -67,6 +67,12 @@ enum InvoiceStatus {
   VOID
 }
 
+enum DriverStatementStatus {
+  ISSUED
+  PAID
+  VOID
+}
+
 // ======================================================
 // BOOKING
 // ======================================================
@@ -168,6 +174,11 @@ model Booking {
   // When an invoice is voided, the service can release this link while
   // retaining the historical invoice-item snapshot.
   invoiceItem InvoiceItem?
+
+  // Current driver statement line linked to this booking.
+  // Nullable so a historical statement can retain its snapshot
+  // if the live booking is ever removed.
+  driverStatementItem DriverStatementItem?
 
   bookingStatusHistories BookingStatusHistory[]
 
@@ -562,6 +573,10 @@ model Driver {
 
   defaultCommission Float?
 
+  // Driver VAT settings used when generating payout statements.
+  vatRegistered Boolean @default(false)
+  vatPercent    Float   @default(20)
+
   // Notes
   profileNote    String?
   controllerNote String?
@@ -579,9 +594,10 @@ model Driver {
   user   User?   @relation(fields: [userId], references: [id])
 
   // Relations
-  bookings  Booking[]
-  vehicles  Vehicle[]
-  documents DriverDocument[]
+  bookings   Booking[]
+  vehicles   Vehicle[]
+  documents  DriverDocument[]
+  statements DriverStatement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -589,6 +605,90 @@ model Driver {
   @@index([status])
   @@index([accountStatus])
   @@index([phone])
+}
+
+// ======================================================
+// DRIVER STATEMENTS
+// ======================================================
+
+model DriverStatement {
+  id String @id @default(uuid())
+
+  statementNumber String @unique
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  // Historical statement period.
+  periodStart DateTime
+  periodEnd   DateTime
+
+  statementDate DateTime
+  dueDate       DateTime
+
+  currency String @default("GBP")
+
+  // Snapshot of the driver's VAT configuration at generation time.
+  vatRegistered Boolean @default(false)
+  vatPercent    Float   @default(0)
+
+  // Financial snapshot.
+  netTotal   Float @default(0)
+  vatTotal   Float @default(0)
+  grossTotal Float @default(0)
+
+  status DriverStatementStatus @default(ISSUED)
+  paidAt DateTime?
+
+  notes String?
+
+  items DriverStatementItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@index([statementDate])
+  @@index([dueDate])
+}
+
+model DriverStatementItem {
+  id String @id @default(uuid())
+
+  statementId String
+  statement   DriverStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  // Nullable so a historical statement survives if the live booking
+  // is ever removed. Unique prevents one booking being paid twice.
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  // Booking snapshot
+  bookingReference String
+  pickupDatetime   DateTime
+  pickupAddress    String
+  dropoffAddress   String
+
+  customerName String
+  journeyType  String?
+
+  // Driver-side finance snapshot
+  driverCost       Float @default(0)
+  driverWaitingPay Float @default(0)
+  driverParking    Float @default(0)
+  driverCongestion Float @default(0)
+
+  netAmount   Float @default(0)
+  vatAmount   Float @default(0)
+  grossAmount Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([statementId])
+  @@index([pickupDatetime])
+  @@index([bookingReference])
 }
 
 // ======================================================

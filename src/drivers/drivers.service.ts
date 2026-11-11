@@ -24,6 +24,8 @@ import { UpdateDriverDocumentDto } from './dto/update-driver-document.dto';
 import { CreateVehicleDocumentDto } from './dto/create-vehicle-document.dto';
 import { UpdateVehicleDocumentDto } from './dto/update-vehicle-document.dto';
 
+import { createClient } from '@supabase/supabase-js';
+
 @Injectable()
 export class DriversService {
   constructor(private prisma: PrismaService) {}
@@ -235,6 +237,125 @@ export class DriversService {
       });
     });
   }
+
+  async uploadProfilePhoto(
+  driverId: string,
+  file: {
+    buffer: Buffer;
+    mimetype: string;
+    originalname: string;
+    size: number;
+  },
+) {
+  const driver = await this.prisma.driver.findUnique({
+    where: {
+      id: driverId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!driver) {
+    throw new NotFoundException('Driver not found');
+  }
+
+  if (!file) {
+    throw new BadRequestException('Profile photo is required');
+  }
+
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ];
+
+  if (!allowedMimeTypes.includes(file.mimetype)) {
+    throw new BadRequestException(
+      'Only JPG, PNG and WEBP images are allowed',
+    );
+  }
+
+  const maxSize = 5 * 1024 * 1024;
+
+  if (file.size > maxSize) {
+    throw new BadRequestException(
+      'Profile photo cannot be larger than 5MB',
+    );
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new BadRequestException(
+      'Supabase Storage is not configured',
+    );
+  }
+
+  const supabase = createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    },
+  );
+
+  const bucket =
+    process.env.SUPABASE_DRIVER_PHOTOS_BUCKET ||
+    'driver-profile-photos';
+
+  const extension =
+    file.mimetype === 'image/png'
+      ? 'png'
+      : file.mimetype === 'image/webp'
+        ? 'webp'
+        : 'jpg';
+
+  const filePath =
+    `drivers/${driverId}/profile-${Date.now()}.${extension}`;
+
+  const { error: uploadError } =
+    await supabase.storage
+      .from(bucket)
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+  if (uploadError) {
+    throw new BadRequestException(
+      `Unable to upload profile photo: ${uploadError.message}`,
+    );
+  }
+
+  const { data: publicUrlData } =
+    supabase.storage
+      .from(bucket)
+      .getPublicUrl(filePath);
+
+  const photoUrl = publicUrlData.publicUrl;
+
+  const updatedDriver =
+    await this.prisma.driver.update({
+      where: {
+        id: driverId,
+      },
+      data: {
+        photo: photoUrl,
+      },
+    });
+
+  return {
+    success: true,
+    photo: updatedDriver.photo,
+  };
+}
 
   /*
    * =====================================================
