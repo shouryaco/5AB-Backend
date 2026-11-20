@@ -22,6 +22,22 @@ enum BookingStatus {
   REJECTED
 }
 
+enum PaymentLinkStatus {
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
+  FAILED
+}
+
+enum RefundStatus {
+  REQUESTED
+  PROCESSING
+  REFUNDED
+  REJECTED
+  FAILED
+}
+
 enum DriverStatus {
   AVAILABLE
   BUSY
@@ -182,6 +198,9 @@ model Booking {
 
   bookingStatusHistories BookingStatusHistory[]
 
+  paymentLinks   PaymentLink[]
+  refundRequests RefundRequest[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -212,10 +231,12 @@ model ClientAccount {
 
   isActive Boolean @default(true)
 
-  bookers    Booker[]
-  passengers Passenger[]
-  bookings   Booking[]
-  invoices   Invoice[]
+  bookers        Booker[]
+  passengers     Passenger[]
+  bookings       Booking[]
+  invoices       Invoice[]
+  paymentLinks   PaymentLink[]
+  refundRequests RefundRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -505,6 +526,112 @@ model InvoiceItem {
   @@index([invoiceId])
   @@index([pickupDatetime])
   @@index([bookingReference])
+}
+
+// ======================================================
+// PAYMENT LINKS
+// ======================================================
+
+model PaymentLink {
+  id String @id @default(uuid())
+
+  accountId String?
+  account   ClientAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  bookingReference String?
+  accountName      String?
+  customerName     String
+  customerEmail    String
+  remarks          String?
+
+  currency String @default("GBP")
+
+  netAmount   Float @default(0)
+  vatAmount   Float @default(0)
+  grossAmount Float @default(0)
+  cardCharge  Float @default(0)
+  totalAmount Float @default(0)
+
+  status PaymentLinkStatus @default(PENDING)
+
+  provider String @default("STRIPE")
+
+  stripeCheckoutSessionId String? @unique
+  stripePaymentIntentId   String? @unique
+
+  paymentUrl String?
+
+  expiresAt      DateTime?
+  paidAt         DateTime?
+  cancelledAt    DateTime?
+  refundRequests RefundRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([paidAt])
+}
+
+// ======================================================
+// REFUNDS
+// ======================================================
+
+model RefundRequest {
+  id String @id @default(uuid())
+
+  refundNumber String @unique
+
+  paymentLinkId String?
+  paymentLink   PaymentLink? @relation(fields: [paymentLinkId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  accountId String?
+  account   ClientAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  // Historical snapshots
+  bookingReference String?
+  accountName      String?
+  customerName     String
+  customerEmail    String?
+
+  currency String @default("GBP")
+
+  // Original Stripe payment reference at request time
+  stripePaymentIntentId String?
+  stripeRefundId        String? @unique
+
+  originalAmount Float @default(0)
+  refundAmount   Float @default(0)
+
+  reason    String
+  adminNote String?
+
+  status RefundStatus @default(REQUESTED)
+
+  requestedAt DateTime  @default(now())
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  processedAt DateTime?
+  failedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([paymentLinkId])
+  @@index([bookingId])
+  @@index([accountId])
+  @@index([status])
+  @@index([requestedAt])
+  @@index([processedAt])
 }
 
 // ======================================================
